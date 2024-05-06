@@ -22,15 +22,13 @@ module WaveFunctionCollapse
       @tiles = tiles
       @width = width.to_i
       @height = height.to_i
-
-      # @grid = Array.new(width) { |x| Array.new(height) { |y| Cell.new(x, y, @tiles.shuffle) } }
       @grid = []
       @height.times { |y| @width.times { |x| @grid << Cell.new(x, y, @tiles.shuffle) } }
       @uncollapsed_cells_grid = @grid.reject(&:collapsed)
       @max_entropy = @tiles.length
     end
 
-    def grid_cell(x, y)
+    def cell_at(x, y)
       @grid[@width * y + x]
     end
 
@@ -59,8 +57,6 @@ module WaveFunctionCollapse
     end
 
     def prepend_empty_row
-      raise
-
       x = 0
       while x < @width
         @grid[x].shift
@@ -93,7 +89,7 @@ module WaveFunctionCollapse
         y = 0
 
         while y < @height
-          rx[y] = grid_cell(x, y).tile
+          rx[y] = cell_at(x, y).tile
           y += 1
         end
         x += 1
@@ -141,7 +137,7 @@ module WaveFunctionCollapse
         while nci < ncil
           tile = neighbor_tiles[nci]
           nci += 1
-          next if new_tile_ids[tile.tileid]
+          next if new_tile_ids.has_key?(tile.tileid)
 
           tile_edge_hash = tile.send(opposite_direction)
           if tile_edge_hash == source_edge_hash
