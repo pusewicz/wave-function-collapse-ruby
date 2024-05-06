@@ -24,7 +24,7 @@ module WaveFunctionCollapse
     end
 
     def tile
-      @tiles.first if @collapsed
+      @tiles[0] if @collapsed
     end
 
     def collapse
