@@ -3,8 +3,6 @@
 require "test_helper"
 
 class TestModel < Minitest::Test
-  include WaveFunctionCollapse
-
   def test_initialize
     tiles = [
       Tile.new(tileid: 0, wangid: [0, 0, 0, 0, 0, 0, 0, 0]),

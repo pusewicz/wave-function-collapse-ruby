@@ -130,14 +130,14 @@ module WaveFunctionCollapse
               entropy,
               x * @tile_width + (@tile_width / 2),
               y * @tile_height + (@tile_height / 2),
-              ZOrder::Map, 0.5, 0.5, 1, 1, color
+              ZOrder::MAP, 0.5, 0.5, 1, 1, color
             )
           end
 
           next unless tile
 
           image = @tiles[tile.tileid]
-          image.draw(x * @tile_width, y * @tile_height, ZOrder::Map)
+          image.draw(x * @tile_width, y * @tile_height, ZOrder::MAP)
         end
       end
     end

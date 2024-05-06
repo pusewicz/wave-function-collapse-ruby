@@ -1,6 +1,7 @@
 module WaveFunctionCollapse
   class Cell
-    attr_accessor :collapsed, :entropy, :tiles, :x, :y
+    attr_reader :tiles
+    attr_accessor :collapsed, :entropy, :x, :y
     alias_method :collapsed?, :collapsed
 
     def initialize(x, y, tiles)
