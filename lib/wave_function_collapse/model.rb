@@ -127,10 +127,12 @@ module WaveFunctionCollapse
       sci = 0
       scil = source_tiles.length
 
+
+
       while sci < scil
         source_tile = source_tiles[sci]
         sci += 1
-        source_edge_hash = case source_tile
+        source_edge_hash = case evaluation_direction
         when :up then source_tile.up
         when :right then source_tile.right
         when :down then source_tile.down
