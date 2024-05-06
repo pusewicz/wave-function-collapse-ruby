@@ -33,14 +33,15 @@ module WaveFunctionCollapse
       self.tiles = [@tiles.max_by { |t| rand**(1.0 / t.probability) }]
     end
 
-    def neighbors(grid)
-      return if grid.nil?
+    def neighbors(model)
+      return if model.nil?
 
-      @neighbors["#{@x},#{@y}"] ||= begin
-        up = grid[@x][@y + 1] if grid[@x] && @y < grid[0].length - 1
-        down = grid[@x][@y - 1] if grid[@x] && @y.positive?
-        right = grid[@x + 1][@y] if @x < grid.length - 1
-        left = grid[@x - 1][@y] if @x.positive?
+      @neighbors[model.width * y + x] ||= begin
+        up = model.grid_cell(@x, @y + 1) if @y < model.height - 1
+        down = model.grid_cell(@x, @y - 1) if @y.positive?
+        right = model.grid_cell(@x + 1, @y) if @x < model.width - 1
+        left = model.grid_cell(@x - 1, @y) if @x.positive?
+
         {up: up, down: down, right: right, left: left}
       end
     end
