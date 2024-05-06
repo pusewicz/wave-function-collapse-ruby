@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+require "benchmark"
+require "json"
+require "wave_function_collapse"
+
+WIDTH = 20
+HEIGHT = 20
+
+json = JSON.load_file!("assets/map.tsj")
+tiles =
+  json["wangsets"].last["wangtiles"].map do |tile|
+    prob = json["tiles"]&.find { |t| t["id"] == tile["tileid"] }&.fetch("probability")
+    WaveFunctionCollapse::Tile.new(
+      tileid: tile["tileid"],
+      wangid: tile["wangid"],
+      probability: prob
+    )
+  end
+times = []
+
+puts RUBY_DESCRIPTION
+
+times = 3.times.map { |i|
+  time = Benchmark.realtime {
+    model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
+    print "Run ##{i + 1}: Benchmark for Model(grid=#{model.width}x#{model.height} entropy=#{model.max_entropy})… "
+    until model.complete?
+      model.solve
+    end
+  }
+  puts "Finished in #{time.round(2)}s"
+  time
+}
+
+puts "Average time: #{times.sum / times.size}"
+puts "Slowest time: #{times.max}"
+puts "Fastest time: #{times.min}"

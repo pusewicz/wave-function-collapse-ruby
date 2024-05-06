@@ -37,10 +37,10 @@ module WaveFunctionCollapse
       return if model.nil?
 
       @neighbors[model.width * y + x] ||= begin
-        up = model.grid_cell(@x, @y + 1) if @y < model.height - 1
-        down = model.grid_cell(@x, @y - 1) if @y.positive?
-        right = model.grid_cell(@x + 1, @y) if @x < model.width - 1
-        left = model.grid_cell(@x - 1, @y) if @x.positive?
+        up = model.cell_at(@x, @y + 1) if @y < model.height - 1
+        down = model.cell_at(@x, @y - 1) if @y.positive?
+        right = model.cell_at(@x + 1, @y) if @x < model.width - 1
+        left = model.cell_at(@x - 1, @y) if @x.positive?
 
         {up: up, down: down, right: right, left: left}
       end

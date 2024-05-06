@@ -1,5 +1,9 @@
 # Wave Function Collapse in Ruby
 
+This repository is an example implementation of the [Wave Function Collapse](https://github.com/mxgmn/WaveFunctionCollapse) algorithm using [Ruby](https://www.ruby-lang.org/) and [Gosu](https://www.libgosu.org/).
+
+The algorithm is used to generate the entire map using tiles based on the rules. Rules are defined using the [Tiled](https://www.mapeditor.org/) program and read by the Ruby program from the [TSJ](https://github.com/pusewicz/wave-function-collapse-ruby/blob/main/assets/map.tsj) file.
+
 ![Wave Function Collapse in Ruby](assets/screenshot.png)
 
 ## Objective
@@ -14,14 +18,17 @@ Run `bin/run` to run the example.
 
 ## Benchmark
 
-Run `ruby test/benchmark.rb` to see how fast the algorithm is.
+Run `bin/benchmark` to see how fast the algorithm is.
 
 #### Apple M3 Max 64GB (2023): 12.437260s
 
-    $ ruby test/benchmark.rb
-    ruby 3.3.0 (2023-12-25 revision 5124f9ac75) [arm64-darwin23]
-    Running benchmark for Model(grid=20x20 entropy=188)...
-    12.362356   0.020133  12.382489 ( 12.437260)
+        ruby 3.3.0 (2023-12-25 revision 5124f9ac75) [arm64-darwin23]
+        Run #1: Benchmark for Model(grid=20x20 entropy=188)… Finished in 11.65s
+        Run #2: Benchmark for Model(grid=20x20 entropy=188)… Finished in 13.46s
+        Run #3: Benchmark for Model(grid=20x20 entropy=188)… Finished in 11.89s
+        Average time: 12.33499966666568
+        Slowest time: 13.458501000000979
+        Fastest time: 11.65374900000461
 
 ## Contributing
 
