@@ -13,7 +13,7 @@ class TestModel < Minitest::Test
 
     assert_equal 320, model.width
     assert_equal 240, model.height
-    assert_equal 320 * 240, model.grid.map(&:size).sum
+    assert_equal 320 * 240, model.grid.size
     assert_equal 3, model.max_entropy
     assert_equal 0, model.percent
     refute model.complete?

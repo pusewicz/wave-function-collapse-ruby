@@ -121,7 +121,7 @@ module WaveFunctionCollapse
         column.reverse.each_with_index do |tile, y|
           inverted_y = (y - @model.height + 1).abs
 
-          entropy = @model.grid[x][inverted_y].entropy
+          entropy = @model.grid_cell(x, inverted_y).entropy
 
           if entropy > 1
             percent_entropy = (entropy.to_f / @model.max_entropy * 255).round
