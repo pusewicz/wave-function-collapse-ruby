@@ -22,10 +22,14 @@ module WaveFunctionCollapse
       @tiles = tiles
       @width = width.to_i
       @height = height.to_i
-
-      @grid = Array.new(width) { |x| Array.new(height) { |y| Cell.new(x, y, @tiles.shuffle) } }
-      @uncollapsed_cells_grid = @grid.flatten.reject(&:collapsed)
+      @grid = []
+      @height.times { |y| @width.times { |x| @grid << Cell.new(x, y, @tiles.shuffle) } }
+      @uncollapsed_cells_grid = @grid.reject(&:collapsed)
       @max_entropy = @tiles.length
+    end
+
+    def cell_at(x, y)
+      @grid[@width * y + x]
     end
 
     def complete?
@@ -79,18 +83,18 @@ module WaveFunctionCollapse
     def generate_grid
       x = 0
       result = []
-      lx = @grid.length
-      while x < lx
+
+      while x < @width
         rx = result[x] = []
         y = 0
-        pgx = @grid[x]
-        ly = pgx.length
-        while y < ly
-          rx[y] = pgx[y].tile
+
+        while y < @height
+          rx[y] = cell_at(x, y).tile
           y += 1
         end
         x += 1
       end
+
       result
     end
 
@@ -110,7 +114,7 @@ module WaveFunctionCollapse
     end
 
     def evaluate_neighbor(source_cell, evaluation_direction)
-      neighbor_cell = source_cell.neighbors(@grid)[evaluation_direction]
+      neighbor_cell = source_cell.neighbors(self)[evaluation_direction]
       return if neighbor_cell.nil? || neighbor_cell.collapsed
 
       original_tile_count = neighbor_cell.tiles.length
@@ -122,16 +126,19 @@ module WaveFunctionCollapse
       neighbor_tiles = neighbor_cell.tiles
       sci = 0
       scil = source_tiles.length
+
       while sci < scil
         source_tile = source_tiles[sci]
         sci += 1
         source_edge_hash = source_tile.send(evaluation_direction)
         nci = 0
         ncil = neighbor_tiles.length
+
         while nci < ncil
           tile = neighbor_tiles[nci]
           nci += 1
           next if new_tile_ids.has_key?(tile.tileid)
+
           tile_edge_hash = tile.send(opposite_direction)
           if tile_edge_hash == source_edge_hash
             new_tile_ids[tile.tileid] = true
@@ -139,6 +146,7 @@ module WaveFunctionCollapse
           end
         end
       end
+
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
       @uncollapsed_cells_grid.delete(neighbor_cell) if neighbor_cell.collapsed
 
