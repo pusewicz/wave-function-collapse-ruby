@@ -127,8 +127,6 @@ module WaveFunctionCollapse
       sci = 0
       scil = source_tiles.length
 
-
-
       while sci < scil
         source_tile = source_tiles[sci]
         sci += 1
