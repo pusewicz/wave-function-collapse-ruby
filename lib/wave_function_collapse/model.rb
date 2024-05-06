@@ -130,7 +130,12 @@ module WaveFunctionCollapse
       while sci < scil
         source_tile = source_tiles[sci]
         sci += 1
-        source_edge_hash = source_tile.send(evaluation_direction)
+        source_edge_hash = case source_tile
+        when :up then source_tile.up
+        when :right then source_tile.right
+        when :down then source_tile.down
+        when :left then source_tile.left
+        end
         nci = 0
         ncil = neighbor_tiles.length
 
@@ -139,7 +144,12 @@ module WaveFunctionCollapse
           nci += 1
           next if new_tile_ids.has_key?(tile.tileid)
 
-          tile_edge_hash = tile.send(opposite_direction)
+          tile_edge_hash = case opposite_direction
+          when :up then tile.up
+          when :right then tile.right
+          when :down then tile.down
+          when :left then tile.left
+          end
           if tile_edge_hash == source_edge_hash
             new_tile_ids[tile.tileid] = true
             new_tiles << tile
