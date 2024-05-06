@@ -1,5 +1,9 @@
 # Wave Function Collapse in Ruby
 
+This repository is an example implementation of the [Wave Function Collapse](https://github.com/mxgmn/WaveFunctionCollapse) algorithm using [Ruby](https://www.ruby-lang.org/) and [Gosu](https://www.libgosu.org/).
+
+The algorithm is used to generate the entire map using tiles based on the rules. Rules are defined using the [Tiled](https://www.mapeditor.org/) program and read by the Ruby program from the [TSJ](https://github.com/pusewicz/wave-function-collapse-ruby/blob/main/assets/map.tsj) file.
+
 ![Wave Function Collapse in Ruby](assets/screenshot.png)
 
 ## Objective
