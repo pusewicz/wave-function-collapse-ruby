@@ -22,14 +22,15 @@ tiles =
   end
 times = []
 
-puts RUBY_DESCRIPTION
+puts RUBY_DESCRIPTION unless ENV["CI"]
 
 times = 10.times.map { |i|
   time = Benchmark.realtime {
     model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
     print "Run ##{i + 1}: Benchmark for Model(grid=#{model.width}x#{model.height} entropy=#{model.max_entropy})… " unless ENV["CI"]
+    model.solve
     until model.complete?
-      model.solve
+      model.iterate
     end
   }
   puts "Finished in #{time.round(2)}s" unless ENV["CI"]
@@ -38,7 +39,12 @@ times = 10.times.map { |i|
 
 average = times.sum / times.size
 if ENV["CI"]
-  puts average
+  puts JSON.dump([
+    { name: "Average time", unit: "Seconds", value: average },
+    { name: "Slowest time", unit: "Seconds", value: times.max },
+    { name: "Fastest time", unit: "Seconds", value: times.min },
+    { name: "P90", unit: "Seconds", value: times.sort[8] }
+  ])
 else
   puts "Average time: #{average}"
   puts "Slowest time: #{times.max}"
