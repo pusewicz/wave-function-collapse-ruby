@@ -99,7 +99,7 @@ module WaveFunctionCollapse
     private
 
     def version_label
-      @label ||= [[RUBY_ENGINE, RUBY_VERSION].join('/'), ['gosu', Gosu::VERSION].join('/'), RUBY_PLATFORM].join(" ")
+      @label ||= [[RUBY_ENGINE, RUBY_VERSION].join("/"), ["gosu", Gosu::VERSION].join("/"), RUBY_PLATFORM].join(" ")
     end
 
     def add_label(text, color = Gosu::Color::WHITE)
