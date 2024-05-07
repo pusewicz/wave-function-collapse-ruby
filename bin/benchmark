@@ -38,9 +38,9 @@ times = 10.times.map { |i|
 
 average = times.sum / times.size
 if ENV["CI"]
+  puts average
+else
   puts "Average time: #{average}"
   puts "Slowest time: #{times.max}"
   puts "Fastest time: #{times.min}"
-else
-  puts average
 end
