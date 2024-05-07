@@ -1,20 +1,23 @@
 module WaveFunctionCollapse
   class Cell
-    attr_reader :tiles
+    @@cellid = 0
+    attr_reader :tiles, :cellid
     attr_accessor :collapsed, :entropy, :x, :y
     alias_method :collapsed?, :collapsed
 
     def initialize(x, y, tiles)
+      @cellid = @@cellid
       @collapsed = tiles.size == 1
       @entropy = tiles.size
       @tiles = tiles
       @neighbors = {}
       @x = x
       @y = y
+      @@cellid += 1
     end
 
     def ==(other)
-      @x == other.x && @y == other.y
+      @cellid == other.cellid
     end
 
     def tiles=(new_tiles)
