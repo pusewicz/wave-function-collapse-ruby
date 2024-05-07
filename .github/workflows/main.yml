@@ -7,6 +7,11 @@ on:
 
   pull_request:
 
+permissions:
+  contents: write
+  deployments: write
+  pull-requests: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,14 +33,31 @@ jobs:
       - name: Run the default task
         run: bundle exec rake
       - name: Run benchmark
-        run: bundle exec bin/benchmark
+        run: bundle exec bin/benchmark | tee output.txt
+      - name: Download previous benchmark data
+        uses: actions/cache@v4
+        with:
+          path: ./cache
+          key: ${{ runner.os }}-benchmark
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "smallerIsBetter"
+          output-file-path: output.txt
+          external-data-json-path: ./cache/benchmark-data.json
+          fail-on-alert: true
+          # GitHub API token to make a commit comment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Enable alert commit comment
+          comment-on-alert: true
+          # Mention @pusewicz in the commit comment
+          alert-comment-cc-users: "@pusewicz"
+          summary-always: true
+          auto-push: true
 
   contrib-readme-job:
     runs-on: ubuntu-latest
     name: Automate contributors list in README
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - name: Contribute List
         uses: akhilmhdh/contributors-readme-action@v2.3.10

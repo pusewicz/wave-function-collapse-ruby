@@ -24,21 +24,23 @@ times = []
 
 puts RUBY_DESCRIPTION
 
-times = 3.times.map { |i|
+times = 10.times.map { |i|
   time = Benchmark.realtime {
     model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
-    print "Run ##{i + 1}: Benchmark for Model(grid=#{model.width}x#{model.height} entropy=#{model.max_entropy})… "
+    print "Run ##{i + 1}: Benchmark for Model(grid=#{model.width}x#{model.height} entropy=#{model.max_entropy})… " unless ENV["CI"]
     until model.complete?
       model.solve
     end
   }
-  puts "Finished in #{time.round(2)}s"
+  puts "Finished in #{time.round(2)}s" unless ENV["CI"]
   time
 }
 
 average = times.sum / times.size
-puts "Average time: #{average}"
-puts "Slowest time: #{times.max}"
-puts "Fastest time: #{times.min}"
-
-puts "Result: %2.2fs" % average
+if ENV["CI"]
+  puts "Average time: #{average}"
+  puts "Slowest time: #{times.max}"
+  puts "Fastest time: #{times.min}"
+else
+  puts average
+end
