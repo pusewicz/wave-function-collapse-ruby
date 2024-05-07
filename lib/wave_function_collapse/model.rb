@@ -57,23 +57,18 @@ module WaveFunctionCollapse
     end
 
     def prepend_empty_row
+      @grid = @grid.drop(@width)
+      @grid.each { |cell| cell.y -= 1 }
       x = 0
       while x < @width
-        @grid[x].shift
-        y = 0
-        while y < @height - 1
-          @grid[x][y].y -= 1
-          y += 1
-        end
         new_cell = Cell.new(x, @height - 1, @tiles)
-        @grid[x] << new_cell
+        @grid << new_cell
         @uncollapsed_cells_grid << new_cell
         x += 1
       end
-
-      @width.times do |x|
-        evaluate_neighbor(@grid[x][@height - 2], :up)
-      end
+      @width.times { |x|
+        evaluate_neighbor(cell_at(x, @height - 2), :up)
+      }
     end
 
     def random_cell
