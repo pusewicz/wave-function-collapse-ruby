@@ -16,7 +16,7 @@ module WaveFunctionCollapse
       left: :right
     }.freeze
 
-    attr_reader :tiles, :width, :height, :grid, :max_entropy
+    attr_reader :tiles, :width, :height, :cells, :max_entropy
 
     def initialize(tiles, width, height)
       @tiles = tiles
@@ -63,7 +63,7 @@ module WaveFunctionCollapse
       while x < @width
         new_cell = Cell.new(x, @height - 1, @tiles)
         @cells << new_cell
-        @uncollapsed_cells<< new_cell
+        @uncollapsed_cells << new_cell
         x += 1
       end
       @width.times { |x|
