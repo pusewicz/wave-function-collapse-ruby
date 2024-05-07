@@ -134,8 +134,20 @@ module WaveFunctionCollapse
         end
       end
 
-      new_tiles = neighbor_tiles.select.with_index do |neighbor_tile, i|
-        source_tile_edges.any? { |source_tile_edge| source_tile_edge == opposite_tile_edges[i] }
+      new_tiles = []
+      ntc = neighbor_tiles.length
+      i = 0
+      while i < ntc
+        ii = 0
+        stel = source_tile_edges.length
+        while ii < stel
+          if source_tile_edges[ii] == opposite_tile_edges[i]
+            new_tiles << neighbor_tiles[i]
+            break
+          end
+          ii += 1
+        end
+        i += 1
       end
 
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
