@@ -109,47 +109,35 @@ module WaveFunctionCollapse
     end
 
     def evaluate_neighbor(source_cell, evaluation_direction)
-      neighbor_cell = source_cell.neighbors(self)[evaluation_direction]
-      return if neighbor_cell.nil? || neighbor_cell.collapsed
+      neighbor_cell = source_cell.neighbors(self)[evaluation_direction] || return
+      return if neighbor_cell.collapsed
 
       original_tile_count = neighbor_cell.tiles.length
       opposite_direction = OPPOSITE_OF[evaluation_direction]
 
-      new_tile_ids = {}
       new_tiles = []
-      source_tiles = source_cell.tiles
       neighbor_tiles = neighbor_cell.tiles
-      sci = 0
-      scil = source_tiles.length
 
-      while sci < scil
-        source_tile = source_tiles[sci]
-        sci += 1
-        source_edge_hash = case evaluation_direction
+      source_tile_edges = source_cell.tiles.map do |source_tile|
+        case evaluation_direction
         when :up then source_tile.up
         when :right then source_tile.right
         when :down then source_tile.down
         when :left then source_tile.left
         end
-        nci = 0
-        ncil = neighbor_tiles.length
+      end
 
-        while nci < ncil
-          tile = neighbor_tiles[nci]
-          nci += 1
-          next if new_tile_ids.has_key?(tile.tileid)
-
-          tile_edge_hash = case opposite_direction
-          when :up then tile.up
-          when :right then tile.right
-          when :down then tile.down
-          when :left then tile.left
-          end
-          if tile_edge_hash == source_edge_hash
-            new_tile_ids[tile.tileid] = true
-            new_tiles << tile
-          end
+      opposite_tile_edges = neighbor_tiles.map do |opposite_tile|
+        case opposite_direction
+        when :up then opposite_tile.up
+        when :right then opposite_tile.right
+        when :down then opposite_tile.down
+        when :left then opposite_tile.left
         end
+      end
+
+      new_tiles = neighbor_tiles.select.with_index do |neighbor_tile, i|
+        source_tile_edges.any? { |source_tile_edge| source_tile_edge == opposite_tile_edges[i] }
       end
 
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
