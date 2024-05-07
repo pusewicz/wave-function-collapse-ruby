@@ -7,7 +7,7 @@ module WaveFunctionCollapse
     def initialize
       super(WIDTH, HEIGHT)
       self.caption = "Wave Function Collapse in Ruby"
-      @font = Gosu::Font.new(16)
+      @font = Gosu::Font.new(14)
       @small_font = Gosu::Font.new(12)
       @map_json = JSON.load_file!("assets/map.tsj")
       @tile_width = @map_json["tilewidth"]
@@ -51,7 +51,8 @@ module WaveFunctionCollapse
         add_label("Press A to add row.")
       else
         time = Process.clock_gettime(Process::CLOCK_MONOTONIC) - @started_at
-        add_label("Generating map #{@model.width}x#{@model.height}. Elapsed #{"%02.2f" % time}s. #{"%02.2f" % @model.percent}% complete. Press P to pause/unpause, R to restart.")
+        add_label("Generating #{@model.width}x#{@model.height}. Elapsed #{"%02.2f" % time}s. #{"%02.2f" % @model.percent}% complete.")
+        add_label("Press P to pause/unpause, R to restart.")
       end
       if (last_time = @times.last)
         mss = last_time * 1000
@@ -61,19 +62,18 @@ module WaveFunctionCollapse
       draw_map
 
       average_time_mss = (@times.sum / @times.size.to_f) * 1000
-      add_label("Average iteration time: #{"%03.2f" % average_time_mss}ms", (average_time_mss > 16) ? Gosu::Color::RED : Gosu::Color::GREEN)
+      add_label("AVG(mss)=#{"%03.2f" % average_time_mss}ms", (average_time_mss > 16) ? Gosu::Color::RED : Gosu::Color::GREEN)
 
       p90_time = @times.sort[(@times.size * 0.9).to_i] * 1000
-      add_label("P90 iteration time: #{"%03.2f" % p90_time}ms", (p90_time > 16) ? Gosu::Color::RED : Gosu::Color::GREEN)
+      add_label("P90(mss)=#{"%03.2f" % p90_time}ms", (p90_time > 16) ? Gosu::Color::RED : Gosu::Color::GREEN)
 
       p99_time = @times.sort[(@times.size * 0.99).to_i] * 1000
-      add_label("P99 iteration time: #{"%03.2f" % p99_time}ms", (p99_time > 16) ? Gosu::Color::RED : Gosu::Color::GREEN)
+      add_label("P99(mss)=#{"%03.2f" % p99_time}ms", (p99_time > 16) ? Gosu::Color::RED : Gosu::Color::GREEN)
 
       if @paused
         @font.draw_text_rel("Paused", WIDTH / 2, HEIGHT / 2, ZOrder::UI, 0.5, 0.5)
       end
 
-      add_label version_label
       draw_labels
     end
 
@@ -99,11 +99,7 @@ module WaveFunctionCollapse
     private
 
     def version_label
-      @label ||= begin
-        label = RUBY_DESCRIPTION
-
-        label
-      end
+      @label ||= [[RUBY_ENGINE, RUBY_VERSION].join('/'), ['gosu', Gosu::VERSION].join('/'), RUBY_PLATFORM].join(" ")
     end
 
     def add_label(text, color = Gosu::Color::WHITE)
@@ -112,8 +108,12 @@ module WaveFunctionCollapse
 
     def draw_labels
       @labels.each_with_index do |(text, color), offset|
-        @font.draw_text(text, 20, 20 + (offset * @font.height * 1.2), ZOrder::UI, 1.0, 1.0, color)
+        @font.draw_text(text, 5, 5 + (offset * @font.height * 1.2), ZOrder::UI, 1.0, 1.0, Gosu::Color::BLACK)
+        @font.draw_text(text, 4, 4 + (offset * @font.height * 1.2), ZOrder::UI, 1.0, 1.0, color)
       end
+
+      @small_font.draw_text_rel(version_label, WIDTH - 3, HEIGHT - 1, ZOrder::UI, 1.0, 1.0, 1, 1, Gosu::Color::BLACK)
+      @small_font.draw_text_rel(version_label, WIDTH - 4, HEIGHT - 2, ZOrder::UI, 1.0, 1.0, 1, 1, Gosu::Color::GRAY)
     end
 
     def draw_map
