@@ -159,14 +159,14 @@ module WaveFunctionCollapse
         if ce < min_e
           min_e = ce
           acc.clear
-          acc << cc
+          acc << i
         elsif ce == min_e
-          acc << cc
+          acc << i
         end
 
         i += 1
       end
-      acc.sample
+      ucg[acc.sample]
     end
   end
 end
