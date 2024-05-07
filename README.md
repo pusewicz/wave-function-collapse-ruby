@@ -34,6 +34,11 @@ Run `bin/benchmark` to see how fast the algorithm is.
 
 Bug reports and pull requests are welcome on GitHub at https://github.com/pusewicz/wave-function-collapse-ruby. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/pusewicz/wave-function-collapse-ruby/blob/main/CODE_OF_CONDUCT.md).
 
+## Contributors
+
+<!-- readme: contributors -start -->
+<!-- readme: contributors -end -->
+
 ## License
 
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).

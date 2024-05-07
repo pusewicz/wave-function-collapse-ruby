@@ -27,3 +27,15 @@ jobs:
           bundler-cache: true
       - name: Run the default task
         run: bundle exec rake
+
+  contrib-readme-job:
+    runs-on: ubuntu-latest
+    name: Automate contributors list in README
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Contribute List
+        uses: akhilmhdh/contributors-readme-action@v2.3.10
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
