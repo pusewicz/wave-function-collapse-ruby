@@ -35,14 +35,10 @@ module WaveFunctionCollapse
     end
 
     def collapse
-      return if @tiles.nil?
-
       self.tiles = [@tiles.max_by { |t| rand**(1.0 / t.probability) }]
     end
 
     def neighbors(model)
-      return if model.nil?
-
       @neighbors[model.width * y + x] ||= begin
         up = model.cell_at(@x, @y + 1) if @y < model.height - 1
         down = model.cell_at(@x, @y - 1) if @y.positive?
