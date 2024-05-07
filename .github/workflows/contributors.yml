@@ -1,0 +1,24 @@
+name: Contributors
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  deployments: write
+  pull-requests: write
+
+jobs:
+  contrib-readme-job:
+    runs-on: ubuntu-latest
+    name: Automate contributors list in README
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Contribute List
+        uses: akhilmhdh/contributors-readme-action@v2.3.10
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
