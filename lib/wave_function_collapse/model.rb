@@ -114,8 +114,6 @@ module WaveFunctionCollapse
 
       original_tile_count = neighbor_cell.tiles.length
       opposite_direction = OPPOSITE_OF[evaluation_direction]
-
-      new_tiles = []
       neighbor_tiles = neighbor_cell.tiles
 
       source_tile_edges = source_cell.tiles.map do |source_tile|
