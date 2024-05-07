@@ -22,22 +22,22 @@ module WaveFunctionCollapse
       @tiles = tiles
       @width = width.to_i
       @height = height.to_i
-      @grid = []
-      @height.times { |y| @width.times { |x| @grid << Cell.new(x, y, @tiles.shuffle) } }
-      @uncollapsed_cells_grid = @grid.reject(&:collapsed)
+      @cells = []
+      @height.times { |y| @width.times { |x| @cells << Cell.new(x, y, @tiles.shuffle) } }
+      @uncollapsed_cells = @cells.reject(&:collapsed)
       @max_entropy = @tiles.length
     end
 
     def cell_at(x, y)
-      @grid[@width * y + x]
+      @cells[@width * y + x]
     end
 
     def complete?
-      @uncollapsed_cells_grid.empty?
+      @uncollapsed_cells.empty?
     end
 
     def percent
-      ((@width * @height) - @uncollapsed_cells_grid.length.to_f) / (@width * @height) * 100
+      ((@width * @height) - @uncollapsed_cells.length.to_f) / (@width * @height) * 100
     end
 
     def solve
@@ -47,7 +47,7 @@ module WaveFunctionCollapse
     end
 
     def iterate
-      return false if @uncollapsed_cells_grid.empty?
+      return false if @uncollapsed_cells.empty?
 
       next_cell = find_lowest_entropy
       return false unless next_cell
@@ -57,13 +57,13 @@ module WaveFunctionCollapse
     end
 
     def prepend_empty_row
-      @grid = @grid.drop(@width)
-      @grid.each { |cell| cell.y -= 1 }
+      @cells = @cells.drop(@width)
+      @cells.each { |cell| cell.y -= 1 }
       x = 0
       while x < @width
         new_cell = Cell.new(x, @height - 1, @tiles)
-        @grid << new_cell
-        @uncollapsed_cells_grid << new_cell
+        @cells << new_cell
+        @uncollapsed_cells<< new_cell
         x += 1
       end
       @width.times { |x|
@@ -72,7 +72,7 @@ module WaveFunctionCollapse
     end
 
     def random_cell
-      @uncollapsed_cells_grid.sample
+      @uncollapsed_cells.sample
     end
 
     def generate_grid
@@ -95,8 +95,8 @@ module WaveFunctionCollapse
 
     def process_cell(cell)
       cell.collapse
-      @uncollapsed_cells_grid.delete(cell)
-      return if @uncollapsed_cells_grid.empty?
+      @uncollapsed_cells.delete(cell)
+      return if @uncollapsed_cells.empty?
 
       propagate(cell)
     end
@@ -153,14 +153,14 @@ module WaveFunctionCollapse
       end
 
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
-      @uncollapsed_cells_grid.delete(neighbor_cell) if neighbor_cell.collapsed
+      @uncollapsed_cells.delete(neighbor_cell) if neighbor_cell.collapsed
 
       # if the number of tiles changed, we need to evaluate current cell's neighbors now
       propagate(neighbor_cell) if neighbor_cell.tiles.length != original_tile_count
     end
 
     def find_lowest_entropy
-      ucg = @uncollapsed_cells_grid.to_a
+      ucg = @uncollapsed_cells
       i = 0
       l = ucg.length
       min_e = ucg[0].entropy
