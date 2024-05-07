@@ -37,6 +37,26 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/pusewi
 ## Contributors
 
 <!-- readme: contributors -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/pusewicz">
+                    <img src="https://avatars.githubusercontent.com/u/940?v=4" width="100;" alt="pusewicz"/>
+                    <br />
+                    <sub><b>Piotr Usewicz</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/cyberarm">
+                    <img src="https://avatars.githubusercontent.com/u/581879?v=4" width="100;" alt="cyberarm"/>
+                    <br />
+                    <sub><b>Cyberarm</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
 <!-- readme: contributors -end -->
 
 ## License
