@@ -1,5 +1,5 @@
 module WaveFunctionCollapse
-  class Tile
+  class Tile < BasicObject
     attr_reader :tileid, :probability, :up, :right, :down, :left
 
     def initialize(tileid:, wangid:, probability: 1.0)

@@ -1,5 +1,5 @@
 module WaveFunctionCollapse
-  class Cell
+  class Cell < BasicObject
     @@cellid = 0
     attr_reader :tiles, :cellid
     attr_accessor :collapsed, :entropy, :x, :y
@@ -35,7 +35,7 @@ module WaveFunctionCollapse
     end
 
     def collapse
-      self.tiles = [@tiles.max_by { |t| rand**(1.0 / t.probability) }]
+      self.tiles = [@tiles.max_by { |t| ::Kernel.rand**(1.0 / t.probability) }]
     end
 
     def neighbors(model)
