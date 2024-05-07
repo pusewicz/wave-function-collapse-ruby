@@ -13,6 +13,10 @@ module WaveFunctionCollapse
       @y = y
     end
 
+    def ==(other)
+      @x == other.x && @y == other.y
+    end
+
     def tiles=(new_tiles)
       @tiles = new_tiles
       update
