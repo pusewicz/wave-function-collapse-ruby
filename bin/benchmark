@@ -36,6 +36,9 @@ times = 3.times.map { |i|
   time
 }
 
-puts "Average time: #{times.sum / times.size}"
+average = times.sum / times.size
+puts "Average time: #{average}"
 puts "Slowest time: #{times.max}"
 puts "Fastest time: #{times.min}"
+
+puts "Result: %2.2fs" % average

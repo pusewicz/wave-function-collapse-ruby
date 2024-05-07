@@ -20,15 +20,16 @@ Run `bin/run` to run the example.
 
 Run `bin/benchmark` to see how fast the algorithm is.
 
-#### Apple M3 Max 64GB (2023): 12.437260s
+#### f8157d0: Apple M3 Max 64GB (2023): 1.09s
 
         ruby 3.3.0 (2023-12-25 revision 5124f9ac75) [arm64-darwin23]
-        Run #1: Benchmark for Model(grid=20x20 entropy=188)… Finished in 11.65s
-        Run #2: Benchmark for Model(grid=20x20 entropy=188)… Finished in 13.46s
-        Run #3: Benchmark for Model(grid=20x20 entropy=188)… Finished in 11.89s
-        Average time: 12.33499966666568
-        Slowest time: 13.458501000000979
-        Fastest time: 11.65374900000461
+        Run #1: Benchmark for Model(grid=20x20 entropy=188)… Finished in 1.17s
+        Run #2: Benchmark for Model(grid=20x20 entropy=188)… Finished in 1.02s
+        Run #3: Benchmark for Model(grid=20x20 entropy=188)… Finished in 1.07s
+        Average time: 1.0883400000069134
+        Slowest time: 1.1748530000040773
+        Fastest time: 1.020996000006562
+        Result: 1.09s
 
 ## Contributing
 

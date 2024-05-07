@@ -27,6 +27,8 @@ jobs:
           bundler-cache: true
       - name: Run the default task
         run: bundle exec rake
+      - name: Run benchmark
+        run: bundle exec bin/benchmark
 
   contrib-readme-job:
     runs-on: ubuntu-latest
