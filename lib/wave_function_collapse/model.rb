@@ -24,7 +24,7 @@ module WaveFunctionCollapse
       @height = height.to_i
       @cells = []
       @height.times { |y| @width.times { |x| @cells << Cell.new(x, y, @tiles.shuffle) } }
-      @uncollapsed_cells = @cells.reject(&:collapsed)
+      @uncollapsed_cells_indexes = (0...(width * height)).to_a
       @max_entropy = @tiles.length
     end
 
@@ -33,11 +33,12 @@ module WaveFunctionCollapse
     end
 
     def complete?
-      @uncollapsed_cells.empty?
+      @uncollapsed_cells_indexes.empty?
     end
 
     def percent
-      ((@width * @height) - @uncollapsed_cells.length.to_f) / (@width * @height) * 100
+      size = @width * @height
+      (size - @uncollapsed_cells_indexes.length.to_f) / size * 100
     end
 
     def solve
@@ -47,7 +48,7 @@ module WaveFunctionCollapse
     end
 
     def iterate
-      return false if @uncollapsed_cells.empty?
+      return false if @uncollapsed_cells_indexes.empty?
 
       next_cell = find_lowest_entropy
       return false unless next_cell
@@ -60,19 +61,18 @@ module WaveFunctionCollapse
       @cells = @cells.drop(@width)
       @cells.each { |cell| cell.y -= 1 }
       x = 0
+      y = @height - 1
       while x < @width
-        new_cell = Cell.new(x, @height - 1, @tiles)
-        @cells << new_cell
-        @uncollapsed_cells << new_cell
+        @cells << Cell.new(x, y, @tiles)
+        idx = (@width * y) + x
+        @uncollapsed_cells_indexes << idx
+        evaluate_neighbor(cell_at(x, y - 1), :up)
         x += 1
       end
-      @width.times { |x|
-        evaluate_neighbor(cell_at(x, @height - 2), :up)
-      }
     end
 
     def random_cell
-      @uncollapsed_cells.sample
+      @cells[@uncollapsed_cells_indexes.sample]
     end
 
     def generate_grid
@@ -95,8 +95,12 @@ module WaveFunctionCollapse
 
     def process_cell(cell)
       cell.collapse
-      @uncollapsed_cells.delete(cell)
-      return if @uncollapsed_cells.empty?
+
+      idx = (@width * cell.y) + cell.x
+      @uncollapsed_cells_indexes.delete_at(
+        @uncollapsed_cells_indexes.bsearch_index { |i| i >= idx }
+      )
+      return if @uncollapsed_cells_indexes.empty?
 
       propagate(cell)
     end
@@ -151,34 +155,40 @@ module WaveFunctionCollapse
       end
 
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
-      @uncollapsed_cells.delete(neighbor_cell) if neighbor_cell.collapsed
+      if neighbor_cell.collapsed
+        idx = (@width * neighbor_cell.y) + neighbor_cell.x
+
+        @uncollapsed_cells_indexes.delete_at(
+          @uncollapsed_cells_indexes.bsearch_index { |i| i >= idx }
+        )
+      end
 
       # if the number of tiles changed, we need to evaluate current cell's neighbors now
       propagate(neighbor_cell) if neighbor_cell.tiles.length != original_tile_count
     end
 
     def find_lowest_entropy
-      ucg = @uncollapsed_cells
-      i = 0
-      l = ucg.length
-      min_e = ucg[0].entropy
+      ucg = @uncollapsed_cells_indexes
+      len = ucg.length
+      idx = ucg[0]
+      min_e = @cells[idx].entropy
       acc = []
-      while i < l
-        cc = ucg[i]
-        next i += 1 if !cc
+      i = 0
+      while i < len
+        idx2 = ucg[i]
+        cc = @cells[idx2]
 
         ce = cc.entropy
         if ce < min_e
           min_e = ce
-          acc.clear
-          acc << i
+          acc = [idx2]
         elsif ce == min_e
-          acc << i
+          acc << idx2
         end
 
         i += 1
       end
-      ucg[acc.sample]
+      @cells[acc.sample]
     end
   end
 end
