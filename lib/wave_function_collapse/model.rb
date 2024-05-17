@@ -64,7 +64,7 @@ module WaveFunctionCollapse
         new_cell = Cell.new(x, @height - 1, @tiles)
         @cells << new_cell
         @uncollapsed_cells << new_cell
-        x += 1
+        x = x.succ
       end
       @width.times { |x|
         evaluate_neighbor(cell_at(x, @height - 2), :up)
@@ -85,9 +85,9 @@ module WaveFunctionCollapse
 
         while y < @height
           rx[y] = cell_at(x, y).tile
-          y += 1
+          y = y.succ
         end
-        x += 1
+        x = x.succ
       end
 
       result
@@ -145,9 +145,9 @@ module WaveFunctionCollapse
             new_tiles << neighbor_tiles[i]
             break
           end
-          ii += 1
+          ii = ii.succ
         end
-        i += 1
+        i = i.succ
       end
 
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
@@ -165,7 +165,7 @@ module WaveFunctionCollapse
       acc = []
       while i < l
         cc = ucg[i]
-        next i += 1 if !cc
+        next i = i.succ if !cc
 
         ce = cc.entropy
         if ce < min_e
@@ -176,7 +176,7 @@ module WaveFunctionCollapse
           acc << i
         end
 
-        i += 1
+        i = i.succ
       end
       ucg[acc.sample]
     end

@@ -13,7 +13,7 @@ module WaveFunctionCollapse
       @neighbors = {}
       @x = x
       @y = y
-      @@cellid += 1
+      @@cellid = @@cellid.succ
     end
 
     def ==(other)
