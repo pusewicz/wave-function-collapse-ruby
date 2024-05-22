@@ -3,7 +3,7 @@ require "json"
 module WaveFunctionCollapse
   class Window < Gosu::Window
     WIDTH = 1280
-    HEIGHT = 800
+    HEIGHT = 720
     def initialize
       super(WIDTH, HEIGHT)
       self.caption = "Wave Function Collapse in Ruby"
