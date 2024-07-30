@@ -28,7 +28,8 @@ GEM
     regexp_parser (2.9.0)
     reline (0.5.5)
       io-console (~> 0.5)
-    rexml (3.2.6)
+    rexml (3.3.2)
+      strscan
     rubocop (1.62.1)
       json (~> 2.3)
       language_server-protocol (>= 3.17.0)
@@ -59,6 +60,7 @@ GEM
       lint_roller (~> 1.1)
       rubocop-performance (~> 1.20.2)
     stringio (3.1.0)
+    strscan (3.1.0)
     unicode-display_width (2.5.0)
 
 PLATFORMS
