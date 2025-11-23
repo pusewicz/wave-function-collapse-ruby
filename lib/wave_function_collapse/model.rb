@@ -1,5 +1,3 @@
-require "set"
-
 module WaveFunctionCollapse
   class Model
     MAX_ITERATIONS = 5_000
@@ -27,7 +25,7 @@ module WaveFunctionCollapse
       @cells = []
       build_tile_adjacencies
       @height.times { |y| @width.times { |x| @cells << Cell.new(x, y, @tiles.shuffle) } }
-      @uncollapsed_cells = Set.new(@cells.reject(&:collapsed))
+      @uncollapsed_cells = @cells.reject(&:collapsed)
       @max_entropy = @tiles.length
     end
 
@@ -66,7 +64,7 @@ module WaveFunctionCollapse
     end
 
     def percent
-      ((@width * @height) - @uncollapsed_cells.size.to_f) / (@width * @height) * 100
+      ((@width * @height) - @uncollapsed_cells.length.to_f) / (@width * @height) * 100
     end
 
     def solve
@@ -92,7 +90,7 @@ module WaveFunctionCollapse
       while x < @width
         new_cell = Cell.new(x, @height - 1, @tiles)
         @cells << new_cell
-        @uncollapsed_cells.add(new_cell)
+        @uncollapsed_cells << new_cell
         x = x.succ
       end
       @width.times { |x|
@@ -101,7 +99,7 @@ module WaveFunctionCollapse
     end
 
     def random_cell
-      @uncollapsed_cells.to_a.sample
+      @uncollapsed_cells.sample
     end
 
     def generate_grid
@@ -179,24 +177,27 @@ module WaveFunctionCollapse
     end
 
     def find_lowest_entropy
-      return nil if @uncollapsed_cells.empty?
-
-      min_e = nil
+      ucg = @uncollapsed_cells
+      i = 0
+      l = ucg.length
+      min_e = ucg[0].entropy
       acc = []
+      while i < l
+        cc = ucg[i]
+        next i = i.succ if !cc
 
-      @uncollapsed_cells.each do |cell|
-        ce = cell.entropy
-
-        if min_e.nil? || ce < min_e
+        ce = cc.entropy
+        if ce < min_e
           min_e = ce
           acc.clear
-          acc << cell
+          acc << i
         elsif ce == min_e
-          acc << cell
+          acc << i
         end
-      end
 
-      acc.sample
+        i = i.succ
+      end
+      ucg[acc.sample]
     end
   end
 end
