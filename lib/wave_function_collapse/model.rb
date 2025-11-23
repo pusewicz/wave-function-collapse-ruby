@@ -23,36 +23,9 @@ module WaveFunctionCollapse
       @width = width.to_i
       @height = height.to_i
       @cells = []
-      build_tile_adjacencies
       @height.times { |y| @width.times { |x| @cells << Cell.new(x, y, @tiles.shuffle) } }
       @uncollapsed_cells = @cells.reject(&:collapsed)
       @max_entropy = @tiles.length
-    end
-
-    def build_tile_adjacencies
-      # Pre-compute which tiles can be adjacent in each direction
-      # This transforms the O(n²) runtime matching into O(1) lookup
-      # We build a mapping from edge hash -> list of tiles with that edge in opposite direction
-      @edge_to_tiles = {}
-
-      [:up, :right, :down, :left].each do |direction|
-        @edge_to_tiles[direction] = {}
-
-        opposite_direction = OPPOSITE_OF[direction]
-
-        # For each tile, index it by its opposite edge
-        @tiles.each do |tile|
-          opposite_edge = case opposite_direction
-          when :up then tile.up
-          when :right then tile.right
-          when :down then tile.down
-          when :left then tile.left
-          end
-
-          @edge_to_tiles[direction][opposite_edge] ||= []
-          @edge_to_tiles[direction][opposite_edge] << tile
-        end
-      end
     end
 
     def cell_at(x, y)
@@ -140,33 +113,41 @@ module WaveFunctionCollapse
       return if neighbor_cell.collapsed
 
       original_tile_count = neighbor_cell.tiles.length
+      opposite_direction = OPPOSITE_OF[evaluation_direction]
       neighbor_tiles = neighbor_cell.tiles
 
-      # Collect all valid adjacent tiles from all source tiles
-      # Using pre-computed edge-to-tiles lookup with fast intersection via object_id
-      valid_tile_ids = {}
-      source_cell.tiles.each do |source_tile|
-        # Get the edge of this source tile in the evaluation direction
-        source_edge = case evaluation_direction
+      source_tile_edges = source_cell.tiles.map do |source_tile|
+        case evaluation_direction
         when :up then source_tile.up
         when :right then source_tile.right
         when :down then source_tile.down
         when :left then source_tile.left
         end
+      end
 
-        # Look up all tiles that can be adjacent (pre-computed)
-        compatible_tiles = @edge_to_tiles[evaluation_direction][source_edge]
-        if compatible_tiles
-          compatible_tiles.each do |tile|
-            valid_tile_ids[tile.__id__] = tile
-          end
+      opposite_tile_edges = neighbor_tiles.map do |opposite_tile|
+        case opposite_direction
+        when :up then opposite_tile.up
+        when :right then opposite_tile.right
+        when :down then opposite_tile.down
+        when :left then opposite_tile.left
         end
       end
 
-      # Keep only neighbor tiles that are in the valid set (O(n) intersection)
       new_tiles = []
-      neighbor_tiles.each do |neighbor_tile|
-        new_tiles << neighbor_tile if valid_tile_ids[neighbor_tile.__id__]
+      ntc = neighbor_tiles.length
+      i = 0
+      while i < ntc
+        ii = 0
+        stel = source_tile_edges.length
+        while ii < stel
+          if source_tile_edges[ii] == opposite_tile_edges[i]
+            new_tiles << neighbor_tiles[i]
+            break
+          end
+          ii = ii.succ
+        end
+        i = i.succ
       end
 
       neighbor_cell.tiles = new_tiles unless new_tiles.empty?
