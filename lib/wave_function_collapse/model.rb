@@ -114,39 +114,21 @@ module WaveFunctionCollapse
 
       original_tile_count = neighbor_cell.tiles.length
       opposite_direction = OPPOSITE_OF[evaluation_direction]
+
+      # Build set of valid edges from source cell
+      valid_edges = {}
+      source_cell.tiles.each do |source_tile|
+        valid_edges[source_tile.__send__(evaluation_direction)] = true
+      end
+
+      # Filter neighbor tiles that have matching edges
       neighbor_tiles = neighbor_cell.tiles
-
-      source_tile_edges = source_cell.tiles.map do |source_tile|
-        case evaluation_direction
-        when :up then source_tile.up
-        when :right then source_tile.right
-        when :down then source_tile.down
-        when :left then source_tile.left
-        end
-      end
-
-      opposite_tile_edges = neighbor_tiles.map do |opposite_tile|
-        case opposite_direction
-        when :up then opposite_tile.up
-        when :right then opposite_tile.right
-        when :down then opposite_tile.down
-        when :left then opposite_tile.left
-        end
-      end
-
       new_tiles = []
-      ntc = neighbor_tiles.length
       i = 0
+      ntc = neighbor_tiles.length
       while i < ntc
-        ii = 0
-        stel = source_tile_edges.length
-        while ii < stel
-          if source_tile_edges[ii] == opposite_tile_edges[i]
-            new_tiles << neighbor_tiles[i]
-            break
-          end
-          ii = ii.succ
-        end
+        tile = neighbor_tiles[i]
+        new_tiles << tile if valid_edges[tile.__send__(opposite_direction)]
         i = i.succ
       end
 
