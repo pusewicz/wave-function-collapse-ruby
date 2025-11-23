@@ -29,6 +29,11 @@ module WaveFunctionCollapse
       @height.times { |y| @width.times { |x| @cells << Cell.new(x, y, @tiles.shuffle) } }
       @uncollapsed_cells = Set.new(@cells.reject(&:collapsed))
       @max_entropy = @tiles.length
+
+      # Initialize entropy buckets for O(1) minimum entropy lookup
+      @entropy_buckets = Hash.new { |h, k| h[k] = Set.new }
+      @min_entropy = @max_entropy
+      @uncollapsed_cells.each { |cell| @entropy_buckets[cell.entropy].add(cell) }
     end
 
     def build_tile_adjacencies
@@ -54,6 +59,45 @@ module WaveFunctionCollapse
           @edge_to_tiles[direction][opposite_edge] ||= []
           @edge_to_tiles[direction][opposite_edge] << tile
         end
+      end
+    end
+
+    # Update entropy bucket when a cell's entropy changes
+    def update_cell_entropy(cell, old_entropy, new_entropy)
+      return if old_entropy == new_entropy
+
+      # Remove from old bucket
+      @entropy_buckets[old_entropy].delete(cell)
+      @entropy_buckets.delete(old_entropy) if @entropy_buckets[old_entropy].empty?
+
+      # Add to new bucket (unless collapsed)
+      if new_entropy > 1
+        @entropy_buckets[new_entropy].add(cell)
+      end
+
+      # Update minimum entropy if needed
+      update_min_entropy
+    end
+
+    # Remove cell from entropy tracking (when collapsed or removed)
+    def remove_from_entropy_buckets(cell)
+      # Cell might be in any bucket, so search all buckets to remove it
+      # This is still O(1) amortized since we only check a few entropy levels
+      @entropy_buckets.each do |entropy, bucket|
+        if bucket.delete(cell)
+          @entropy_buckets.delete(entropy) if bucket.empty?
+          break
+        end
+      end
+      update_min_entropy
+    end
+
+    # Find the current minimum entropy value
+    def update_min_entropy
+      if @entropy_buckets.empty?
+        @min_entropy = nil
+      else
+        @min_entropy = @entropy_buckets.keys.min
       end
     end
 
@@ -93,8 +137,10 @@ module WaveFunctionCollapse
         new_cell = Cell.new(x, @height - 1, @tiles)
         @cells << new_cell
         @uncollapsed_cells.add(new_cell)
+        @entropy_buckets[new_cell.entropy].add(new_cell)
         x = x.succ
       end
+      update_min_entropy
       @width.times { |x|
         evaluate_neighbor(cell_at(x, @height - 2), :up)
       }
@@ -123,8 +169,13 @@ module WaveFunctionCollapse
     end
 
     def process_cell(cell)
+      old_entropy = cell.entropy
       cell.collapse
       @uncollapsed_cells.delete(cell)
+      # Remove from the bucket it was in before collapsing
+      @entropy_buckets[old_entropy]&.delete(cell)
+      @entropy_buckets.delete(old_entropy) if @entropy_buckets[old_entropy]&.empty?
+      update_min_entropy
       return if @uncollapsed_cells.empty?
 
       propagate(cell)
@@ -171,32 +222,32 @@ module WaveFunctionCollapse
         new_tiles << neighbor_tile if valid_tile_ids[neighbor_tile.__id__]
       end
 
-      neighbor_cell.tiles = new_tiles unless new_tiles.empty?
-      @uncollapsed_cells.delete(neighbor_cell) if neighbor_cell.collapsed
+      unless new_tiles.empty?
+        old_entropy = neighbor_cell.entropy
+        neighbor_cell.tiles = new_tiles
+        new_entropy = neighbor_cell.entropy
+
+        # Update entropy buckets if entropy changed
+        # update_cell_entropy handles removal from buckets when cell collapses (entropy=1)
+        update_cell_entropy(neighbor_cell, old_entropy, new_entropy) if old_entropy != new_entropy
+
+        # Remove from uncollapsed set if collapsed
+        @uncollapsed_cells.delete(neighbor_cell) if neighbor_cell.collapsed
+      end
 
       # if the number of tiles changed, we need to evaluate current cell's neighbors now
       propagate(neighbor_cell) if neighbor_cell.tiles.length != original_tile_count
     end
 
     def find_lowest_entropy
-      return nil if @uncollapsed_cells.empty?
+      return nil if @min_entropy.nil?
 
-      min_e = nil
-      acc = []
+      # Get cells with minimum entropy from bucket (O(1) instead of O(n))
+      min_entropy_cells = @entropy_buckets[@min_entropy]
+      return nil if min_entropy_cells.nil? || min_entropy_cells.empty?
 
-      @uncollapsed_cells.each do |cell|
-        ce = cell.entropy
-
-        if min_e.nil? || ce < min_e
-          min_e = ce
-          acc.clear
-          acc << cell
-        elsif ce == min_e
-          acc << cell
-        end
-      end
-
-      acc.sample
+      # Sample randomly from cells with same minimum entropy
+      min_entropy_cells.to_a.sample
     end
   end
 end
