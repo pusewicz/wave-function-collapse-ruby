@@ -10,6 +10,8 @@ require "wave_function_collapse"
 WIDTH = 20
 HEIGHT = 20
 
+srand(WIDTH * HEIGHT)
+
 json = JSON.load_file!("assets/map.tsj")
 tiles =
   json["wangsets"].last["wangtiles"].map do |tile|
