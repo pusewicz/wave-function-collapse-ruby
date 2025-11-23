@@ -20,6 +20,14 @@ module WaveFunctionCollapse
       @cellid == other.cellid
     end
 
+    def hash
+      @cellid.hash
+    end
+
+    def eql?(other)
+      @cellid == other.cellid
+    end
+
     def tiles=(new_tiles)
       @tiles = new_tiles
       update
