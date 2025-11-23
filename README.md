@@ -49,6 +49,13 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/pusewi
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/claude">
+                    <img src="https://avatars.githubusercontent.com/u/81847?v=4" width="100;" alt="claude"/>
+                    <br />
+                    <sub><b>Claude</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/cyberarm">
                     <img src="https://avatars.githubusercontent.com/u/581879?v=4" width="100;" alt="cyberarm"/>
                     <br />
