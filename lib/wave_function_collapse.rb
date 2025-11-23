@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "gosu"
-
 module WaveFunctionCollapse
   class Error < StandardError; end
 

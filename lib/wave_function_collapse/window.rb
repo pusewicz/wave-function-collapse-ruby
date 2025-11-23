@@ -1,4 +1,5 @@
 require "json"
+require "gosu"
 
 module WaveFunctionCollapse
   class Window < Gosu::Window
