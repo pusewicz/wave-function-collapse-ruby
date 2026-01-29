@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Ruby
     steps:
-      - name: Update apt and Install sdl
+      - name: Update apt and Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install libsdl2-dev -y
+          sudo apt-get install libsdl2-dev libfontconfig-dev -y
       - uses: actions/checkout@v4
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
