@@ -20,7 +20,7 @@ jobs:
       - name: Update apt and Install sdl
         run: |
           sudo apt-get update
-          sudo apt-get install libsdl2-dev -y
+          sudo apt-get install libsdl2-dev libfontconfig-dev -y
       - uses: actions/checkout@v4
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
