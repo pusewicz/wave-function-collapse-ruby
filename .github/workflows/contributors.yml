@@ -14,6 +14,7 @@ jobs:
   contrib-readme-job:
     runs-on: ubuntu-latest
     name: Automate contributors list in README
+    if: github.event.pusher.name != github.repository_owner
     permissions:
       contents: write
       pull-requests: write
