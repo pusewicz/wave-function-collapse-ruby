@@ -20,7 +20,15 @@ def build_tiles
   end
 end
 
+GC_STAT_KEYS = %i[total_allocated_objects malloc_increase_bytes minor_gc_count major_gc_count].freeze
+
+def gc_delta(before, after)
+  GC_STAT_KEYS.each_with_object({}) { |k, h| h[k] = after[k] - before[k] }
+end
+
 def run_once(klass, tiles, w, h)
+  GC.start
+  gc_before = GC.stat
   t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   model = klass.new(tiles, w, h)
   model.solve
@@ -29,7 +37,9 @@ def run_once(klass, tiles, w, h)
     model.iterate
     iters += 1
   end
-  [Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, iters]
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+  gc_after = GC.stat
+  [elapsed, iters, gc_delta(gc_before, gc_after)]
 end
 
 def median(xs)
@@ -71,11 +81,21 @@ legacy_sizes = (ENV["LEGACY_SIZES"] || "10,15,20,25,30").split(",").map(&:to_i)
 new_sizes = (ENV["NEW_SIZES"] || "10,15,20,30,50,75,100").split(",").map(&:to_i)
 runs = Integer(ENV["RUNS"] || "3")
 skip_legacy = ARGV.include?("--no-legacy")
+show_gc = ENV["GC_STATS"]
 
-printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
-  "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters")
-printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
-  "-----", "----", "-----", "------", "----", "-------", "-----")
+if show_gc
+  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s %-12s %-14s %-8s %-8s\n",
+    "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters",
+    "Alloc/run", "Malloc B/run", "MinorGC", "MajorGC")
+  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s %-12s %-14s %-8s %-8s\n",
+    "-----", "----", "-----", "------", "----", "-------", "-----",
+    "---------", "------------", "-------", "-------")
+else
+  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
+    "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters")
+  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
+    "-----", "----", "-----", "------", "----", "-------", "-----")
+end
 
 [
   [WaveFunctionCollapse::LegacyModel, skip_legacy ? [] : legacy_sizes, "Legacy"],
@@ -84,16 +104,26 @@ printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
   sizes.each do |s|
     times = []
     iters_seen = 0
+    gc_deltas = []
     runs.times do |r|
       srand(s * 1000 + r + 1)
-      elapsed, iters = run_once(klass, tiles, s, s)
+      elapsed, iters, gc = run_once(klass, tiles, s, s)
       times << elapsed
       iters_seen = iters
+      gc_deltas << gc
     end
     med = median(times)
     best = times.min
-    printf("%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d\n",
-      label, "#{s}x#{s}", s * s, med, best, iters_seen / med, iters_seen)
+    if show_gc
+      avg = ->(k) { gc_deltas.sum { |g| g[k] } / gc_deltas.size }
+      printf("%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d %12d %14d %8d %8d\n",
+        label, "#{s}x#{s}", s * s, med, best, iters_seen / med, iters_seen,
+        avg.call(:total_allocated_objects), avg.call(:malloc_increase_bytes),
+        avg.call(:minor_gc_count), avg.call(:major_gc_count))
+    else
+      printf("%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d\n",
+        label, "#{s}x#{s}", s * s, med, best, iters_seen / med, iters_seen)
+    end
   end
   puts
 end
