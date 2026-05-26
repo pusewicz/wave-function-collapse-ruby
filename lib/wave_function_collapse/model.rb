@@ -493,12 +493,18 @@ module WaveFunctionCollapse
             len = list.length
             while i < len
               tp = list[i]
-              idx = (nc * t_max + tp) * 4 + opp_d
-              count = compatible.getbyte(idx) - 1
-              compatible.setbyte(idx, count)
-              if count == 0 && (wave[nc] & (1 << tp)) != 0
-                ban(nc, tp)
-                return if @contradiction
+              # Skip tiles already banned at the neighbour — decrementing
+              # their supporter count would silently wrap past zero and
+              # waste work; the bit check below would suppress the ban
+              # anyway.
+              if (wave[nc] & (1 << tp)) != 0
+                idx = (nc * t_max + tp) * 4 + opp_d
+                count = compatible.getbyte(idx) - 1
+                compatible.setbyte(idx, count)
+                if count == 0
+                  ban(nc, tp)
+                  return if @contradiction
+                end
               end
               i += 1
             end
