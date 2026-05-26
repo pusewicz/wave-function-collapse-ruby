@@ -14,7 +14,7 @@ class TestModel < Minitest::Test
     assert_equal 320, model.width
     assert_equal 240, model.height
     assert_equal 3, model.max_entropy
-    assert_in_delta(100.0 / (320 * 240), model.percent, 0.01)
+    assert_equal 0.0, model.percent
     refute model.complete?
     assert model.solve
     assert model.iterate
