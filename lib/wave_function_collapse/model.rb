@@ -541,6 +541,13 @@ module WaveFunctionCollapse
       bit_table = @bit
       neighbours = @neighbours
       t_max = @num_tiles
+      remaining = @remaining
+      sum_w = @sum_w
+      sum_w_log_w = @sum_w_log_w
+      entropies = @entropies
+      weights = @weights
+      weights_log_weights = @weights_log_weights
+      chosen_tile = @chosen_tile
 
       until prop_cells.empty?
         return if @contradiction
@@ -557,17 +564,38 @@ module WaveFunctionCollapse
             len = list.length
             while i < len
               tp = list[i]
+              bit_tp = bit_table[tp]
               # Skip tiles already banned at the neighbour — decrementing
               # their supporter count would silently wrap past zero and
-              # waste work; the bit check below would suppress the ban
-              # anyway.
-              if (wave[nc] & bit_table[tp]) != 0
+              # waste work.
+              if (wave[nc] & bit_tp) != 0
                 idx = (nc * t_max + tp) * 4 + opp_d
                 count = compatible.getbyte(idx) - 1
                 compatible.setbyte(idx, count)
                 if count == 0
-                  ban(nc, tp)
-                  return if @contradiction
+                  # Inlined fast-path of `ban(nc, tp)`. We already know
+                  # `bit_tp` is set in `wave[nc]` from the check above,
+                  # so the redundant gate in `ban` is skipped. The same
+                  # state updates run; `ban` itself stays callable for
+                  # `orphan_ban_pass` and `observe` where the gate is
+                  # still needed.
+                  wave[nc] = wave[nc] ^ bit_tp
+                  new_remaining = remaining[nc] - 1
+                  remaining[nc] = new_remaining
+                  sum_w[nc] -= weights[tp]
+                  sum_w_log_w[nc] -= weights_log_weights[tp]
+                  if new_remaining == 0
+                    @contradiction = true
+                    return
+                  end
+                  s = sum_w[nc]
+                  entropies[nc] = ::Math.log(s) - sum_w_log_w[nc] / s
+                  if new_remaining == 1
+                    @uncollapsed_count -= 1
+                    chosen_tile[nc] = wave[nc].bit_length - 1
+                  end
+                  prop_cells.push(nc)
+                  prop_tiles.push(tp)
                 end
               end
               i += 1
