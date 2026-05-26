@@ -475,17 +475,10 @@ module WaveFunctionCollapse
 
       if r == 1
         @uncollapsed_count -= 1
-        # Record the single remaining tile so grid() is O(1) per cell.
-        mask = @wave[c]
-        tt = 0
-        while mask > 0
-          if (mask & 1) != 0
-            @chosen_tile[c] = tt
-            break
-          end
-          mask >>= 1
-          tt += 1
-        end
+        # Single bit left — `bit_length` returns its position + 1, so
+        # subtracting one gives the tile index in O(1) instead of
+        # scanning the mask bit by bit.
+        @chosen_tile[c] = wave[c].bit_length - 1
       end
 
       @prop_cells.push(c)
