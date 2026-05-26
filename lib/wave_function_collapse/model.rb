@@ -209,6 +209,36 @@ module WaveFunctionCollapse
       # Stack buffers reused across propagations.
       @prop_cells = []
       @prop_tiles = []
+      build_neighbours
+    end
+
+    # Precompute the neighbour cell index for every (cell, direction) pair,
+    # stored flat at `@neighbours[c * 4 + d]`. Missing neighbours (off-grid)
+    # are encoded as -1. Replaces per-iteration `c % w`, `c / w`, bounds
+    # checks, and `ny * w + nx` in every hot loop that walks neighbours.
+    def build_neighbours
+      n = @cells_count
+      w = @width
+      h = @height
+      neighbours = ::Array.new(n * 4)
+      c = 0
+      while c < n
+        cx = c % w
+        cy = c / w
+        d = 0
+        while d < 4
+          nx = cx + DX[d]
+          ny = cy + DY[d]
+          neighbours[c * 4 + d] = if nx >= 0 && nx < w && ny >= 0 && ny < h
+            ny * w + nx
+          else
+            -1
+          end
+          d += 1
+        end
+        c += 1
+      end
+      @neighbours = neighbours.freeze
     end
 
     # ---- per-run state (resettable on contradiction/restart) ---------------------
@@ -246,8 +276,7 @@ module WaveFunctionCollapse
     def build_initial_compatible
       n = @cells_count
       t_max = @num_tiles
-      w = @width
-      h = @height
+      neighbours = @neighbours
 
       buf = ::String.new(::String.new.b, capacity: n * t_max * 4)
       buf.force_encoding(::Encoding::BINARY)
@@ -260,13 +289,9 @@ module WaveFunctionCollapse
       # Patch border cells: missing directions get sentinel 255.
       c = 0
       while c < n
-        cx = c % w
-        cy = c / w
         d = 0
         while d < 4
-          nx = cx + DX[d]
-          ny = cy + DY[d]
-          unless nx >= 0 && nx < w && ny >= 0 && ny < h
+          if neighbours[c * 4 + d] < 0
             base = (c * t_max) * 4 + d
             t = 0
             while t < t_max
@@ -285,8 +310,7 @@ module WaveFunctionCollapse
     def rebuild_compatible_from_wave
       n = @cells_count
       t_max = @num_tiles
-      w = @width
-      h = @height
+      neighbours = @neighbours
       propagator = @propagator
       wave = @wave
 
@@ -296,14 +320,10 @@ module WaveFunctionCollapse
 
       c = 0
       while c < n
-        cx = c % w
-        cy = c / w
         d = 0
         while d < 4
-          nx = cx + DX[d]
-          ny = cy + DY[d]
-          if nx >= 0 && nx < w && ny >= 0 && ny < h
-            nc = ny * w + nx
+          nc = neighbours[c * 4 + d]
+          if nc >= 0
             wmask = wave[nc]
             t = 0
             while t < t_max
@@ -479,24 +499,18 @@ module WaveFunctionCollapse
       compatible = @compatible
       wave = @wave
       bit_table = @bit
+      neighbours = @neighbours
       t_max = @num_tiles
-      w = @width
-      h = @height
 
       until prop_cells.empty?
         return if @contradiction
         t = prop_tiles.pop
         c = prop_cells.pop
 
-        cx = c % w
-        cy = c / w
-
         d = 0
         while d < 4
-          nx = cx + DX[d]
-          ny = cy + DY[d]
-          if nx >= 0 && nx < w && ny >= 0 && ny < h
-            nc = ny * w + nx
+          nc = neighbours[c * 4 + d]
+          if nc >= 0
             list = propagator_lists[d][t]
             opp_d = OPP[d]
             i = 0
