@@ -207,9 +207,19 @@ module WaveFunctionCollapse
     end
 
     def build_initial_state
+      n = @cells_count
       # Stack buffers reused across propagations.
       @prop_cells = []
       @prop_tiles = []
+      # Pre-allocate per-cell state arrays once; setup_wave_state resets
+      # them in place via Array#fill (no per-restart allocations).
+      @wave = ::Array.new(n)
+      @remaining = ::Array.new(n)
+      @sum_w = ::Array.new(n)
+      @sum_w_log_w = ::Array.new(n)
+      @entropies = ::Array.new(n)
+      @noise = ::Array.new(n)
+      @chosen_tile = ::Array.new(n)
       build_neighbours
       build_initial_compatible_template
     end
@@ -249,17 +259,22 @@ module WaveFunctionCollapse
       n = @cells_count
       t_max = @num_tiles
 
-      @wave = ::Array.new(n, @full_mask)
-      @remaining = ::Array.new(n, t_max)
-      @sum_w = ::Array.new(n, @initial_sum_w)
-      @sum_w_log_w = ::Array.new(n, @initial_sum_w_log_w)
-      @entropies = ::Array.new(n, @initial_entropy)
-      @noise = ::Array.new(n) { ::Kernel.rand * 1e-6 }
-      @chosen_tile = ::Array.new(n, -1)
+      # Reset per-cell state in place — buffers are pre-allocated in
+      # build_initial_state, so contradiction restarts don't churn the GC.
+      @wave.fill(@full_mask)
+      @remaining.fill(t_max)
+      @sum_w.fill(@initial_sum_w)
+      @sum_w_log_w.fill(@initial_sum_w_log_w)
+      @entropies.fill(@initial_entropy)
+      @chosen_tile.fill(-1)
+      i = 0
+      while i < n
+        @noise[i] = ::Kernel.rand * 1e-6
+        i += 1
+      end
       # When the tileset has a single tile every cell is born collapsed,
-      # so `complete?` must report true immediately. Fill `@chosen_tile`
-      # for any cell whose wave already has exactly one bit and count
-      # only the genuinely undetermined cells.
+      # so `complete?` must report true immediately. Fill must come after
+      # the generic `-1` fill above so we overwrite, not the other way.
       if t_max == 1
         @chosen_tile.fill(0)
         @uncollapsed_count = 0
