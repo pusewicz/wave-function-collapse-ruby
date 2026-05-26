@@ -185,6 +185,9 @@ module WaveFunctionCollapse
       @initial_entropy = ::Math.log(sum_w) - sum_w_log_w / sum_w
 
       @full_mask = (1 << t_max) - 1
+      # Precomputed `1 << t` per tile — saves a Bignum allocation per
+      # propagation inner iteration and ban call.
+      @bit = ::Array.new(t_max) { |t| 1 << t }.freeze
 
       # Precompute the 4-byte-per-tile block representing an interior cell's
       # initial supporter counts (one byte per direction). Used to build the
@@ -323,13 +326,13 @@ module WaveFunctionCollapse
       t_max = @num_tiles
       compatible = @compatible
       wave = @wave
+      bit_table = @bit
 
       c = 0
       while c < n
         t = 0
         while t < t_max
-          bit = 1 << t
-          if (wave[c] & bit) != 0
+          if (wave[c] & bit_table[t]) != 0
             base = (c * t_max + t) * 4
             if compatible.getbyte(base) == 0 ||
                 compatible.getbyte(base + 1) == 0 ||
@@ -390,47 +393,46 @@ module WaveFunctionCollapse
       r = ::Kernel.rand * total
 
       weights = @weights
+      bit_table = @bit
+      t_max = @num_tiles
       chosen = -1
-      mask = wmask
       t = 0
-      while mask > 0
-        if (mask & 1) != 0
+      while t < t_max
+        if (wmask & bit_table[t]) != 0
           r -= weights[t]
           if r <= 0
             chosen = t
             break
           end
         end
-        mask >>= 1
         t += 1
       end
 
       if chosen < 0
         # Floating-point edge: pick the last set bit in wmask.
-        mask = wmask
-        t = 0
-        while mask > 0
-          chosen = t if (mask & 1) != 0
-          mask >>= 1
-          t += 1
+        t = t_max - 1
+        while t >= 0
+          if (wmask & bit_table[t]) != 0
+            chosen = t
+            break
+          end
+          t -= 1
         end
       end
 
       # Ban every other tile at this cell.
-      mask = wmask
       t = 0
-      while mask > 0
-        if (mask & 1) != 0 && t != chosen
+      while t < t_max
+        if t != chosen && (wmask & bit_table[t]) != 0
           ban(c, t)
           return if @contradiction
         end
-        mask >>= 1
         t += 1
       end
     end
 
     def ban(c, t)
-      bit = 1 << t
+      bit = @bit[t]
       wave = @wave
       return if (wave[c] & bit) == 0
 
@@ -476,6 +478,7 @@ module WaveFunctionCollapse
       propagator_lists = @propagator_lists
       compatible = @compatible
       wave = @wave
+      bit_table = @bit
       t_max = @num_tiles
       w = @width
       h = @height
@@ -504,7 +507,7 @@ module WaveFunctionCollapse
               # their supporter count would silently wrap past zero and
               # waste work; the bit check below would suppress the ban
               # anyway.
-              if (wave[nc] & (1 << tp)) != 0
+              if (wave[nc] & bit_table[tp]) != 0
                 idx = (nc * t_max + tp) * 4 + opp_d
                 count = compatible.getbyte(idx) - 1
                 compatible.setbyte(idx, count)
