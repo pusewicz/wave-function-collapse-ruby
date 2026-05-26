@@ -222,6 +222,11 @@ module WaveFunctionCollapse
       @chosen_tile = ::Array.new(n)
       build_neighbours
       build_initial_compatible_template
+      # Persistent supporter-count buffer: sized once, reset via
+      # String#replace on every restart so we never allocate a fresh
+      # n*t_max*4-byte String on a contradiction.
+      @compatible = ::String.new(capacity: @cells_count * @num_tiles * 4, encoding: ::Encoding::BINARY)
+      @compatible << @initial_compatible
     end
 
     # Precompute the neighbour cell index for every (cell, direction) pair,
@@ -285,7 +290,7 @@ module WaveFunctionCollapse
       @prop_cells.clear
       @prop_tiles.clear
 
-      @compatible = @initial_compatible.dup
+      @compatible.replace(@initial_compatible)
       orphan_ban_pass
       propagate
     end
@@ -325,6 +330,10 @@ module WaveFunctionCollapse
       end
 
       @initial_compatible = buf.freeze
+      # Frozen 0xFF-filled sentinel of the same size, reused by
+      # rebuild_compatible_from_wave to clear @compatible in place
+      # without allocating an intermediate fill string.
+      @compatible_fill = ("\xff".b * (n * t_max * 4)).freeze
     end
 
     def rebuild_compatible_from_wave
@@ -333,10 +342,9 @@ module WaveFunctionCollapse
       neighbours = @neighbours
       propagator = @propagator
       wave = @wave
+      buf = @compatible
 
-      buf = ::String.new(::String.new.b, capacity: n * t_max * 4)
-      buf.force_encoding(::Encoding::BINARY)
-      buf << "\xff".b * (n * t_max * 4)
+      buf.replace(@compatible_fill)
 
       c = 0
       while c < n
@@ -357,8 +365,6 @@ module WaveFunctionCollapse
         end
         c += 1
       end
-
-      @compatible = buf
     end
 
     def orphan_ban_pass
