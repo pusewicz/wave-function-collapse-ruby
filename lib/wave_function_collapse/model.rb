@@ -1,166 +1,527 @@
+# frozen_string_literal: true
+
 module WaveFunctionCollapse
+  # Wave Function Collapse — bitmask wave + AC-4 compatible counter.
+  #
+  # Each cell's domain is a single Integer bitmask (`@wave[c]`). Adjacency is
+  # precomputed as `@propagator[d][t]` masks and `@propagator_lists[d][t]`
+  # index arrays. Supporter counts are kept in a flat byte buffer
+  # (`@compatible`, addressed via `setbyte`/`getbyte`) — when a count hits
+  # zero the tile is banned at that cell, which kicks off iterative
+  # propagation through an explicit stack. Entropy is maintained
+  # incrementally per cell.
   class Model
-    MAX_ITERATIONS = 5_000
+    DX = [0, 1, 0, -1].freeze
+    DY = [1, 0, -1, 0].freeze
+    OPP = [2, 3, 0, 1].freeze
 
-    DIRECTION_TO_INDEXES = {
-      up: [7, 0, 1],
-      right: [1, 2, 3],
-      down: [5, 4, 3],
-      left: [7, 6, 5]
-    }.freeze
-
-    OPPOSITE_OF = {
-      up: :down,
-      right: :left,
-      down: :up,
-      left: :right
-    }.freeze
-
-    attr_reader :tiles, :width, :height, :cells, :max_entropy
+    attr_reader :tiles, :width, :height, :max_entropy
 
     def initialize(tiles, width, height)
       @tiles = tiles
       @width = width.to_i
       @height = height.to_i
-      @cells = []
-      @height.times { |y| @width.times { |x| @cells << Cell.new(x, y, @tiles.shuffle) } }
-      @uncollapsed_cells = @cells.reject(&:collapsed)
-      @max_entropy = @tiles.length
-    end
+      @num_tiles = tiles.length
+      @max_entropy = @num_tiles
+      @cells_count = @width * @height
 
-    def cell_at(x, y)
-      @cells[@width * y + x]
+      build_propagator
+      build_initial_state
+      setup_wave_state
     end
 
     def complete?
-      @uncollapsed_cells.empty?
+      @uncollapsed_count == 0
     end
 
     def percent
-      ((@width * @height) - @uncollapsed_cells.length.to_f) / (@width * @height) * 100
+      (@cells_count - @uncollapsed_count).to_f / @cells_count * 100
+    end
+
+    def entropy_at(x, y)
+      @remaining[y * @width + x]
     end
 
     def solve
-      cell = random_cell
-      process_cell(cell)
-      generate_grid
+      observe_and_propagate
+      true
     end
 
     def iterate
-      return false if @uncollapsed_cells.empty?
+      return false if complete?
+      observe_and_propagate
+      true
+    end
 
-      next_cell = find_lowest_entropy
-      return false unless next_cell
-
-      process_cell(next_cell)
+    # Returns a 2-D array indexed [x][y] of tiles (nil for uncollapsed cells).
+    # Called on demand by the renderer; not by iterate/solve.
+    def grid
       generate_grid
     end
 
     def prepend_empty_row
-      @cells = @cells.drop(@width)
-      @cells.each { |cell| cell.y -= 1 }
-      x = 0
-      while x < @width
-        new_cell = Cell.new(x, @height - 1, @tiles)
-        @cells << new_cell
-        @uncollapsed_cells << new_cell
-        x = x.succ
+      w = @width
+      n = @cells_count
+
+      # Shift state down: drop bottom row (cells 0..w-1), append new top row.
+      @wave = @wave[w, n - w] + Array.new(w, @full_mask)
+      @remaining = @remaining[w, n - w] + Array.new(w, @num_tiles)
+      @sum_w = @sum_w[w, n - w] + Array.new(w, @initial_sum_w)
+      @sum_w_log_w = @sum_w_log_w[w, n - w] + Array.new(w, @initial_sum_w_log_w)
+      @entropies = @entropies[w, n - w] + Array.new(w, @initial_entropy)
+      @noise = @noise[w, n - w] + Array.new(w) { ::Kernel.rand * 1e-6 }
+      @chosen_tile = @chosen_tile[w, n - w] + Array.new(w, -1)
+
+      @uncollapsed_count = 0
+      c = 0
+      while c < n
+        @uncollapsed_count += 1 if @remaining[c] > 1
+        c += 1
       end
-      @width.times { |x|
-        evaluate_neighbor(cell_at(x, @height - 2), :up)
-      }
+
+      rebuild_compatible_from_wave
+      orphan_ban_pass
+      propagate
+      true
     end
 
-    def random_cell
-      @uncollapsed_cells.sample
-    end
-
+    # Returns a 2-D array indexed [x][y] of tiles, or nil for uncollapsed cells.
     def generate_grid
+      result = ::Array.new(@width)
       x = 0
-      result = []
-
       while x < @width
-        rx = result[x] = []
+        col = result[x] = ::Array.new(@height)
         y = 0
-
         while y < @height
-          rx[y] = cell_at(x, y).tile
-          y = y.succ
+          col[y] = tile_at(x, y)
+          y += 1
         end
-        x = x.succ
+        x += 1
       end
-
       result
     end
 
-    def process_cell(cell)
-      cell.collapse
-      @uncollapsed_cells.delete(cell)
-      return if @uncollapsed_cells.empty?
+    private
 
-      propagate(cell)
-    end
+    # ---- one-time precomputation ------------------------------------------------
 
-    def propagate(source_cell)
-      evaluate_neighbor(source_cell, :up)
-      evaluate_neighbor(source_cell, :right)
-      evaluate_neighbor(source_cell, :down)
-      evaluate_neighbor(source_cell, :left)
-    end
+    def build_propagator
+      tiles = @tiles
+      t_max = @num_tiles
 
-    def evaluate_neighbor(source_cell, evaluation_direction)
-      neighbor_cell = source_cell.neighbors(self)[evaluation_direction] || return
-      return if neighbor_cell.collapsed
-
-      original_tile_count = neighbor_cell.tiles.length
-      opposite_direction = OPPOSITE_OF[evaluation_direction]
-
-      # Build set of valid edges from source cell
-      valid_edges = {}
-      source_cell.tiles.each do |source_tile|
-        valid_edges[source_tile.__send__(evaluation_direction)] = true
+      # Canonical integer ID per unique edge signature (Array of 3 ints).
+      edge_id = {}
+      ups = ::Array.new(t_max)
+      rights = ::Array.new(t_max)
+      downs = ::Array.new(t_max)
+      lefts = ::Array.new(t_max)
+      t = 0
+      while t < t_max
+        tile = tiles[t]
+        ups[t] = (edge_id[tile.up] ||= edge_id.size)
+        rights[t] = (edge_id[tile.right] ||= edge_id.size)
+        downs[t] = (edge_id[tile.down] ||= edge_id.size)
+        lefts[t] = (edge_id[tile.left] ||= edge_id.size)
+        t += 1
       end
 
-      # Filter neighbor tiles that have matching edges
-      neighbor_tiles = neighbor_cell.tiles
-      new_tiles = []
-      i = 0
-      ntc = neighbor_tiles.length
-      while i < ntc
-        tile = neighbor_tiles[i]
-        new_tiles << tile if valid_edges[tile.__send__(opposite_direction)]
-        i = i.succ
-      end
+      # Edge per (tile, direction). Index by direction id: 0=up,1=right,2=down,3=left.
+      edges_per_dir = [ups, rights, downs, lefts]
 
-      neighbor_cell.tiles = new_tiles unless new_tiles.empty?
-      @uncollapsed_cells.delete(neighbor_cell) if neighbor_cell.collapsed
+      # propagator[d][a] = bitmask of b such that match(a, d, b) — i.e.
+      # tile a's edge in dir d equals tile b's edge in opposite(d).
+      propagator = ::Array.new(4) { ::Array.new(t_max, 0) }
+      propagator_lists = ::Array.new(4) { ::Array.new(t_max) }
 
-      # if the number of tiles changed, we need to evaluate current cell's neighbors now
-      propagate(neighbor_cell) if neighbor_cell.tiles.length != original_tile_count
-    end
-
-    def find_lowest_entropy
-      ucg = @uncollapsed_cells
-      i = 0
-      l = ucg.length
-      min_e = ucg[0].entropy
-      acc = []
-      while i < l
-        cc = ucg[i]
-        next i = i.succ if !cc
-
-        ce = cc.entropy
-        if ce < min_e
-          min_e = ce
-          acc.clear
-          acc << i
-        elsif ce == min_e
-          acc << i
+      d = 0
+      while d < 4
+        opp_d = OPP[d]
+        my_edges = edges_per_dir[d]
+        opp_edges = edges_per_dir[opp_d]
+        a = 0
+        while a < t_max
+          my_edge = my_edges[a]
+          mask = 0
+          list = []
+          b = 0
+          while b < t_max
+            if opp_edges[b] == my_edge
+              mask |= (1 << b)
+              list << b
+            end
+            b += 1
+          end
+          propagator[d][a] = mask
+          propagator_lists[d][a] = list.freeze
+          a += 1
         end
-
-        i = i.succ
+        propagator[d].freeze
+        propagator_lists[d].freeze
+        d += 1
       end
-      ucg[acc.sample]
+
+      @propagator = propagator.freeze
+      @propagator_lists = propagator_lists.freeze
+
+      # Weights
+      weights = ::Array.new(t_max)
+      log_weights = ::Array.new(t_max)
+      weights_log_weights = ::Array.new(t_max)
+      sum_w = 0.0
+      sum_w_log_w = 0.0
+      t = 0
+      while t < t_max
+        w = tiles[t].probability.to_f
+        weights[t] = w
+        lw = ::Math.log(w)
+        log_weights[t] = lw
+        weights_log_weights[t] = w * lw
+        sum_w += w
+        sum_w_log_w += w * lw
+        t += 1
+      end
+      @weights = weights.freeze
+      @weights_log_weights = weights_log_weights.freeze
+      @initial_sum_w = sum_w
+      @initial_sum_w_log_w = sum_w_log_w
+      @initial_entropy = ::Math.log(sum_w) - sum_w_log_w / sum_w
+
+      @full_mask = (1 << t_max) - 1
+
+      # Precompute the 4-byte-per-tile block representing an interior cell's
+      # initial supporter counts (one byte per direction). Used to build the
+      # @compatible buffer quickly.
+      block = ::String.new(::String.new.b, capacity: t_max * 4)
+      block.force_encoding(::Encoding::BINARY)
+      t = 0
+      while t < t_max
+        block << propagator_lists[0][t].length.chr
+        block << propagator_lists[1][t].length.chr
+        block << propagator_lists[2][t].length.chr
+        block << propagator_lists[3][t].length.chr
+        t += 1
+      end
+      @interior_block = block.freeze
+    end
+
+    def build_initial_state
+      # Stack buffers reused across propagations.
+      @prop_cells = []
+      @prop_tiles = []
+    end
+
+    # ---- per-run state (resettable on contradiction/restart) ---------------------
+
+    def setup_wave_state
+      n = @cells_count
+      t_max = @num_tiles
+
+      @wave = ::Array.new(n, @full_mask)
+      @remaining = ::Array.new(n, t_max)
+      @sum_w = ::Array.new(n, @initial_sum_w)
+      @sum_w_log_w = ::Array.new(n, @initial_sum_w_log_w)
+      @entropies = ::Array.new(n, @initial_entropy)
+      @noise = ::Array.new(n) { ::Kernel.rand * 1e-6 }
+      @chosen_tile = ::Array.new(n, -1)
+      @uncollapsed_count = n
+      @contradiction = false
+      @prop_cells.clear
+      @prop_tiles.clear
+
+      build_initial_compatible
+      orphan_ban_pass
+      propagate
+    end
+
+    def build_initial_compatible
+      n = @cells_count
+      t_max = @num_tiles
+      w = @width
+      h = @height
+
+      buf = ::String.new(::String.new.b, capacity: n * t_max * 4)
+      buf.force_encoding(::Encoding::BINARY)
+      c = 0
+      while c < n
+        buf << @interior_block
+        c += 1
+      end
+
+      # Patch border cells: missing directions get sentinel 255.
+      c = 0
+      while c < n
+        cx = c % w
+        cy = c / w
+        d = 0
+        while d < 4
+          nx = cx + DX[d]
+          ny = cy + DY[d]
+          unless nx >= 0 && nx < w && ny >= 0 && ny < h
+            base = (c * t_max) * 4 + d
+            t = 0
+            while t < t_max
+              buf.setbyte(base + t * 4, 255)
+              t += 1
+            end
+          end
+          d += 1
+        end
+        c += 1
+      end
+
+      @compatible = buf
+    end
+
+    def rebuild_compatible_from_wave
+      n = @cells_count
+      t_max = @num_tiles
+      w = @width
+      h = @height
+      propagator = @propagator
+      wave = @wave
+
+      buf = ::String.new(::String.new.b, capacity: n * t_max * 4)
+      buf.force_encoding(::Encoding::BINARY)
+      buf << "\xff".b * (n * t_max * 4)
+
+      c = 0
+      while c < n
+        cx = c % w
+        cy = c / w
+        d = 0
+        while d < 4
+          nx = cx + DX[d]
+          ny = cy + DY[d]
+          if nx >= 0 && nx < w && ny >= 0 && ny < h
+            nc = ny * w + nx
+            wmask = wave[nc]
+            t = 0
+            while t < t_max
+              cnt = popcount(propagator[d][t] & wmask)
+              cnt = 255 if cnt > 255
+              buf.setbyte((c * t_max + t) * 4 + d, cnt)
+              t += 1
+            end
+          end
+          d += 1
+        end
+        c += 1
+      end
+
+      @compatible = buf
+    end
+
+    def orphan_ban_pass
+      n = @cells_count
+      t_max = @num_tiles
+      compatible = @compatible
+      wave = @wave
+
+      c = 0
+      while c < n
+        t = 0
+        while t < t_max
+          bit = 1 << t
+          if (wave[c] & bit) != 0
+            base = (c * t_max + t) * 4
+            if compatible.getbyte(base) == 0 ||
+                compatible.getbyte(base + 1) == 0 ||
+                compatible.getbyte(base + 2) == 0 ||
+                compatible.getbyte(base + 3) == 0
+              ban(c, t)
+            end
+          end
+          t += 1
+        end
+        c += 1
+      end
+    end
+
+    # ---- core observe / ban / propagate -----------------------------------------
+
+    def observe_and_propagate
+      loop do
+        c = find_lowest_entropy_cell
+        return false unless c
+
+        observe(c)
+        propagate
+
+        if @contradiction
+          # Restart: rebuild wave state and try again.
+          setup_wave_state
+          next
+        end
+        return true
+      end
+    end
+
+    def find_lowest_entropy_cell
+      n = @cells_count
+      remaining = @remaining
+      entropies = @entropies
+      noise = @noise
+      best_c = -1
+      best_e = ::Float::INFINITY
+      c = 0
+      while c < n
+        if remaining[c] > 1
+          e = entropies[c] + noise[c]
+          if e < best_e
+            best_e = e
+            best_c = c
+          end
+        end
+        c += 1
+      end
+      best_c < 0 ? nil : best_c
+    end
+
+    def observe(c)
+      wmask = @wave[c]
+      total = @sum_w[c]
+      r = ::Kernel.rand * total
+
+      weights = @weights
+      chosen = -1
+      mask = wmask
+      t = 0
+      while mask > 0
+        if (mask & 1) != 0
+          r -= weights[t]
+          if r <= 0
+            chosen = t
+            break
+          end
+        end
+        mask >>= 1
+        t += 1
+      end
+
+      if chosen < 0
+        # Floating-point edge: pick the last set bit in wmask.
+        mask = wmask
+        t = 0
+        while mask > 0
+          chosen = t if (mask & 1) != 0
+          mask >>= 1
+          t += 1
+        end
+      end
+
+      # Ban every other tile at this cell.
+      mask = wmask
+      t = 0
+      while mask > 0
+        if (mask & 1) != 0 && t != chosen
+          ban(c, t)
+          return if @contradiction
+        end
+        mask >>= 1
+        t += 1
+      end
+    end
+
+    def ban(c, t)
+      bit = 1 << t
+      wave = @wave
+      return if (wave[c] & bit) == 0
+
+      wave[c] = wave[c] ^ bit
+      @remaining[c] -= 1
+
+      w = @weights[t]
+      wlogw = @weights_log_weights[t]
+      @sum_w[c] -= w
+      @sum_w_log_w[c] -= wlogw
+
+      r = @remaining[c]
+      if r == 0
+        @contradiction = true
+        return
+      end
+
+      s = @sum_w[c]
+      @entropies[c] = ::Math.log(s) - @sum_w_log_w[c] / s
+
+      if r == 1
+        @uncollapsed_count -= 1
+        # Record the single remaining tile so grid() is O(1) per cell.
+        mask = @wave[c]
+        tt = 0
+        while mask > 0
+          if (mask & 1) != 0
+            @chosen_tile[c] = tt
+            break
+          end
+          mask >>= 1
+          tt += 1
+        end
+      end
+
+      @prop_cells.push(c)
+      @prop_tiles.push(t)
+    end
+
+    def propagate
+      prop_cells = @prop_cells
+      prop_tiles = @prop_tiles
+      propagator_lists = @propagator_lists
+      compatible = @compatible
+      wave = @wave
+      t_max = @num_tiles
+      w = @width
+      h = @height
+
+      until prop_cells.empty?
+        return if @contradiction
+        t = prop_tiles.pop
+        c = prop_cells.pop
+
+        cx = c % w
+        cy = c / w
+
+        d = 0
+        while d < 4
+          nx = cx + DX[d]
+          ny = cy + DY[d]
+          if nx >= 0 && nx < w && ny >= 0 && ny < h
+            nc = ny * w + nx
+            list = propagator_lists[d][t]
+            opp_d = OPP[d]
+            i = 0
+            len = list.length
+            while i < len
+              tp = list[i]
+              idx = (nc * t_max + tp) * 4 + opp_d
+              count = compatible.getbyte(idx) - 1
+              compatible.setbyte(idx, count)
+              if count == 0 && (wave[nc] & (1 << tp)) != 0
+                ban(nc, tp)
+                return if @contradiction
+              end
+              i += 1
+            end
+          end
+          d += 1
+        end
+      end
+    end
+
+    # ---- helpers ----------------------------------------------------------------
+
+    def tile_at(x, y)
+      t = @chosen_tile[y * @width + x]
+      t < 0 ? nil : @tiles[t]
+    end
+
+    def popcount(x)
+      c = 0
+      while x > 0
+        c += 1 if (x & 1) != 0
+        x >>= 1
+      end
+      c
     end
   end
 end

@@ -33,14 +33,18 @@ module WaveFunctionCollapse
 
     def update
       @labels = []
-      @map = @model.solve if @map.nil?
+      if @map.nil?
+        @model.solve
+        @map = @model.grid
+      end
 
       return if @paused
 
       unless @model.complete?
         time_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        @map = @model.iterate
+        @model.iterate
         @times << Process.clock_gettime(Process::CLOCK_MONOTONIC) - time_start
+        @map = @model.grid
       end
     end
 
@@ -122,7 +126,7 @@ module WaveFunctionCollapse
         column.reverse.each_with_index do |tile, y|
           inverted_y = (y - @model.height + 1).abs
 
-          entropy = @model.cell_at(x, inverted_y).entropy
+          entropy = @model.entropy_at(x, inverted_y)
 
           if entropy > 1
             percent_entropy = (entropy.to_f / @model.max_entropy * 255).round

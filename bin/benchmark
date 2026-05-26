@@ -3,17 +3,13 @@
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
-require "benchmark"
 require "json"
 require "wave_function_collapse"
 
-WIDTH = 20
-HEIGHT = 20
+TILE_PATH = File.expand_path("../assets/map.tsj", __dir__)
 
-srand(WIDTH * HEIGHT)
-
-json = JSON.load_file!("assets/map.tsj")
-tiles =
+def build_tiles
+  json = JSON.load_file(TILE_PATH)
   json["wangsets"].last["wangtiles"].map do |tile|
     prob = json["tiles"]&.find { |t| t["id"] == tile["tileid"] }&.fetch("probability")
     WaveFunctionCollapse::Tile.new(
@@ -22,33 +18,82 @@ tiles =
       probability: prob
     )
   end
-times = []
+end
 
-puts RUBY_DESCRIPTION unless ENV["CI"]
+def run_once(klass, tiles, w, h)
+  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  model = klass.new(tiles, w, h)
+  model.solve
+  iters = 1
+  until model.complete?
+    model.iterate
+    iters += 1
+  end
+  [Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, iters]
+end
 
-times = 10.times.map { |i|
-  time = Benchmark.realtime {
-    model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
-    print "Run ##{i + 1}: Benchmark for Model(grid=#{model.width}x#{model.height} entropy=#{model.max_entropy})… " unless ENV["CI"]
-    model.solve
-    until model.complete?
-      model.iterate
-    end
-  }
-  puts "Finished in #{time.round(2)}s" unless ENV["CI"]
-  time
-}
+def median(xs)
+  s = xs.sort
+  n = s.length
+  n.odd? ? s[n / 2] : (s[n / 2 - 1] + s[n / 2]) / 2.0
+end
 
-average = times.sum / times.size
+tiles = build_tiles
+
 if ENV["CI"]
+  # CI contract: 10 runs of 20x20 on the new Model, JSON output for the
+  # github-action-benchmark workflow. Do not change without updating the workflow.
+  WIDTH = 20
+  HEIGHT = 20
+  srand(WIDTH * HEIGHT)
+  times = 10.times.map {
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
+    model.solve
+    model.iterate until model.complete?
+    Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+  }
   puts JSON.dump([
-    { name: "Average time", unit: "Seconds", value: average },
-    { name: "Slowest time", unit: "Seconds", value: times.max },
-    { name: "Fastest time", unit: "Seconds", value: times.min },
-    { name: "P90", unit: "Seconds", value: times.sort[8] }
+    {name: "Average time", unit: "Seconds", value: times.sum / times.size},
+    {name: "Slowest time", unit: "Seconds", value: times.max},
+    {name: "Fastest time", unit: "Seconds", value: times.min},
+    {name: "P90", unit: "Seconds", value: times.sort[8]}
   ])
-else
-  puts "Average time: #{average}"
-  puts "Slowest time: #{times.max}"
-  puts "Fastest time: #{times.min}"
+  exit
+end
+
+yjit_status = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? "on" : "off"
+puts RUBY_DESCRIPTION
+puts "Tiles loaded: #{tiles.size}, YJIT=#{yjit_status}"
+puts
+
+legacy_sizes = (ENV["LEGACY_SIZES"] || "10,15,20,25,30").split(",").map(&:to_i)
+new_sizes = (ENV["NEW_SIZES"] || "10,15,20,30,50,75,100").split(",").map(&:to_i)
+runs = Integer(ENV["RUNS"] || "3")
+skip_legacy = ARGV.include?("--no-legacy")
+
+printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
+  "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters")
+printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
+  "-----", "----", "-----", "------", "----", "-------", "-----")
+
+[
+  [WaveFunctionCollapse::LegacyModel, skip_legacy ? [] : legacy_sizes, "Legacy"],
+  [WaveFunctionCollapse::Model, new_sizes, "New"]
+].each do |klass, sizes, label|
+  sizes.each do |s|
+    times = []
+    iters_seen = 0
+    runs.times do |r|
+      srand(s * 1000 + r + 1)
+      elapsed, iters = run_once(klass, tiles, s, s)
+      times << elapsed
+      iters_seen = iters
+    end
+    med = median(times)
+    best = times.min
+    printf("%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d\n",
+      label, "#{s}x#{s}", s * s, med, best, iters_seen / med, iters_seen)
+  end
+  puts
 end

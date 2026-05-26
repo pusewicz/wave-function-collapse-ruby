@@ -3,7 +3,7 @@
 module WaveFunctionCollapse
   class Error < StandardError; end
 
-  autoload :Cell, "wave_function_collapse/cell"
+  autoload :LegacyModel, "wave_function_collapse/legacy_model"
   autoload :Model, "wave_function_collapse/model"
   autoload :Tile, "wave_function_collapse/tile"
   autoload :Window, "wave_function_collapse/window"

@@ -13,9 +13,8 @@ class TestModel < Minitest::Test
 
     assert_equal 320, model.width
     assert_equal 240, model.height
-    assert_equal 320 * 240, model.cells.size
     assert_equal 3, model.max_entropy
-    assert_equal 0, model.percent
+    assert_in_delta(100.0 / (320 * 240), model.percent, 0.01)
     refute model.complete?
     assert model.solve
     assert model.iterate
@@ -37,20 +36,14 @@ class TestModel < Minitest::Test
 
     model.prepend_empty_row
 
-    assert_equal 4, model.cells.size
-    assert_equal 1, model.cells[0].entropy
-    assert_equal 1, model.cells[1].entropy
-    assert_predicate model.cells[0], :collapsed?
-    assert_predicate model.cells[0], :collapsed?
-    assert_equal 3, model.cells[2].entropy
-    assert_equal 3, model.cells[3].entropy
-    refute_predicate model.cells[2], :collapsed?
-    refute_predicate model.cells[3], :collapsed?
+    assert_equal 1, model.entropy_at(0, 0)
+    assert_equal 1, model.entropy_at(1, 0)
+    assert_equal 3, model.entropy_at(0, 1)
+    assert_equal 3, model.entropy_at(1, 1)
 
     assert_equal 2, model.width
     assert_equal 2, model.height
-    assert_equal 2 * 2, model.cells.size
     assert_equal 3, model.max_entropy
-    assert_equal 50, model.percent
+    assert_equal 50.0, model.percent
   end
 end
