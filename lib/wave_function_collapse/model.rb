@@ -72,6 +72,13 @@ module WaveFunctionCollapse
       n = @cells_count
       shift_count = n - w
 
+      # Don't carry a leftover flag from an earlier failed run into the
+      # new pass — and reset the propagation stacks too, since they may
+      # still hold entries from a contradiction that returned early.
+      @contradiction = false
+      @prop_cells.clear
+      @prop_tiles.clear
+
       # Shift state down in place: drop bottom row (cells 0..w-1), fill
       # the new top row with default values. Copying low-to-high is safe
       # because each source index (i + w) is greater than its destination.
@@ -103,6 +110,17 @@ module WaveFunctionCollapse
       rebuild_compatible_from_wave
       orphan_ban_pass
       propagate
+
+      if @contradiction
+        # The new row can't be reconciled with the row below it. The
+        # wave is now half-mutated — if we returned anyway, the next
+        # `iterate` would observe `@contradiction == true`, call
+        # `setup_wave_state`, and silently wipe every streamed row.
+        # Reset to a clean blank state and tell the caller the prepend
+        # failed so it can decide what to do.
+        setup_wave_state
+        return false
+      end
       true
     end
 
