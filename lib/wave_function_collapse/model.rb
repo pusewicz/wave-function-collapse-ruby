@@ -28,6 +28,14 @@ module WaveFunctionCollapse
       build_propagator
       build_initial_state
       setup_wave_state
+
+      # All long-lived precomputed data (propagator, neighbours, bit
+      # tables, compatible template + fill sentinel, weights) is frozen
+      # and lives for the model's lifetime. Compact once now so it
+      # settles into old gen and doesn't fragment the heap as solves
+      # churn young-gen objects. Skipped for tiny grids where compaction
+      # cost outweighs the win.
+      ::GC.compact if @cells_count >= 400
     end
 
     def complete?
