@@ -62,15 +62,28 @@ module WaveFunctionCollapse
     def prepend_empty_row
       w = @width
       n = @cells_count
+      shift_count = n - w
 
-      # Shift state down: drop bottom row (cells 0..w-1), append new top row.
-      @wave = @wave[w, n - w] + Array.new(w, @full_mask)
-      @remaining = @remaining[w, n - w] + Array.new(w, @num_tiles)
-      @sum_w = @sum_w[w, n - w] + Array.new(w, @initial_sum_w)
-      @sum_w_log_w = @sum_w_log_w[w, n - w] + Array.new(w, @initial_sum_w_log_w)
-      @entropies = @entropies[w, n - w] + Array.new(w, @initial_entropy)
-      @noise = @noise[w, n - w] + Array.new(w) { ::Kernel.rand * 1e-6 }
-      @chosen_tile = @chosen_tile[w, n - w] + Array.new(w, -1)
+      # Shift state down in place: drop bottom row (cells 0..w-1), fill
+      # the new top row with default values. Copying low-to-high is safe
+      # because each source index (i + w) is greater than its destination.
+      shift_uniform!(@wave, shift_count, @full_mask)
+      shift_uniform!(@remaining, shift_count, @num_tiles)
+      shift_uniform!(@sum_w, shift_count, @initial_sum_w)
+      shift_uniform!(@sum_w_log_w, shift_count, @initial_sum_w_log_w)
+      shift_uniform!(@entropies, shift_count, @initial_entropy)
+      shift_uniform!(@chosen_tile, shift_count, -1)
+
+      noise = @noise
+      i = 0
+      while i < shift_count
+        noise[i] = noise[i + w]
+        i += 1
+      end
+      while i < n
+        noise[i] = ::Kernel.rand * 1e-6
+        i += 1
+      end
 
       @uncollapsed_count = 0
       c = 0
@@ -562,6 +575,20 @@ module WaveFunctionCollapse
     def tile_at(x, y)
       t = @chosen_tile[y * @width + x]
       t < 0 ? nil : @tiles[t]
+    end
+
+    def shift_uniform!(arr, shift_count, fill_value)
+      w = @width
+      i = 0
+      while i < shift_count
+        arr[i] = arr[i + w]
+        i += 1
+      end
+      n = arr.length
+      while i < n
+        arr[i] = fill_value
+        i += 1
+      end
     end
 
     def popcount(x)
