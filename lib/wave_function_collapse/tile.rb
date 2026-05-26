@@ -5,12 +5,13 @@ module WaveFunctionCollapse
     attr_reader :tileid, :probability, :up, :right, :down, :left
 
     # Tilesets typically share edge signatures across many tiles, so intern
-    # the 3-element edge arrays in a class-level cache keyed by the packed
-    # wang IDs. Collapses 4-per-tile array allocations to one per unique
+    # the 3-element edge arrays in a class-level cache keyed by the triple
+    # itself. Collapses 4-per-tile array allocations to one per unique
     # signature. Array#hash is value-based, so consumers that key off these
     # arrays (build_propagator's edge_id dedup) keep working unchanged.
     def self.intern_edge(a, b, c)
-      (@edges ||= {})[(a << 16) | (b << 8) | c] ||= [a, b, c].freeze
+      key = [a, b, c]
+      (@edges ||= {})[key] ||= key.freeze
     end
 
     def initialize(tileid:, wangid:, probability: 1.0)
