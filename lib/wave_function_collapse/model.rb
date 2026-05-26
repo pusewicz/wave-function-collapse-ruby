@@ -191,15 +191,16 @@ module WaveFunctionCollapse
 
       # Precompute the 4-byte-per-tile block representing an interior cell's
       # initial supporter counts (one byte per direction). Used to build the
-      # @compatible buffer quickly.
-      block = ::String.new(::String.new.b, capacity: t_max * 4)
-      block.force_encoding(::Encoding::BINARY)
+      # @compatible buffer quickly. Sized via a single fill string, then
+      # written by setbyte — avoids 4*t_max one-byte `.chr` allocations.
+      block = "\x00".b * (t_max * 4)
       t = 0
       while t < t_max
-        block << propagator_lists[0][t].length.chr
-        block << propagator_lists[1][t].length.chr
-        block << propagator_lists[2][t].length.chr
-        block << propagator_lists[3][t].length.chr
+        base = t * 4
+        block.setbyte(base, propagator_lists[0][t].length)
+        block.setbyte(base + 1, propagator_lists[1][t].length)
+        block.setbyte(base + 2, propagator_lists[2][t].length)
+        block.setbyte(base + 3, propagator_lists[3][t].length)
         t += 1
       end
       @interior_block = block.freeze
