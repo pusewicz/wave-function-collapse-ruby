@@ -39,7 +39,7 @@ module WaveFunctionCollapse
     end
 
     def complete?
-      @uncollapsed_count == 0
+      @uncollapsed_count == 0 && !@contradiction
     end
 
     def percent
@@ -183,6 +183,28 @@ module WaveFunctionCollapse
 
       @propagator = propagator.freeze
       @propagator_lists = propagator_lists.freeze
+
+      # Supporter counts live in a byte buffer (`@compatible`), so any
+      # propagator list above 255 entries would silently wrap modulo 256
+      # at build time and corrupt the AC-4 invariants — `complete?` can
+      # even start returning true while the wave is actually contradicted.
+      # Reject these tilesets up front rather than producing wrong output.
+      d = 0
+      while d < 4
+        a = 0
+        while a < t_max
+          if propagator_lists[d][a].length > 255
+            ::Kernel.raise(
+              ::WaveFunctionCollapse::Error,
+              "tile #{a} has #{propagator_lists[d][a].length} compatible " \
+              "neighbours in direction #{d}; the byte-packed supporter " \
+              "counter only fits 0..255"
+            )
+          end
+          a += 1
+        end
+        d += 1
+      end
 
       # Weights
       weights = ::Array.new(t_max)

@@ -72,6 +72,13 @@ class TestModel < Minitest::Test
     assert_equal 3, model.entropy_at(2, 2)
   end
 
+  def test_rejects_tileset_that_overflows_supporter_byte
+    # Supporter counts are stored as bytes (0..255). 256 mutually-compatible
+    # tiles would wrap and silently corrupt the wave; reject up front.
+    tiles = 256.times.map { |i| Tile.new(tileid: i, wangid: [0, 0, 0, 0, 0, 0, 0, 0]) }
+    assert_raises(WaveFunctionCollapse::Error) { Model.new(tiles, 2, 1) }
+  end
+
   def test_zero_probability_tile_does_not_poison_entropy
     # `w * Math.log(w)` is NaN for w == 0; if that leaks into the entropy
     # table, `find_lowest_entropy_cell` never picks a cell and the solve
