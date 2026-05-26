@@ -210,6 +210,7 @@ module WaveFunctionCollapse
       @prop_cells = []
       @prop_tiles = []
       build_neighbours
+      build_initial_compatible_template
     end
 
     # Precompute the neighbour cell index for every (cell, direction) pair,
@@ -268,12 +269,15 @@ module WaveFunctionCollapse
       @prop_cells.clear
       @prop_tiles.clear
 
-      build_initial_compatible
+      @compatible = @initial_compatible.dup
       orphan_ban_pass
       propagate
     end
 
-    def build_initial_compatible
+    # The initial supporter-count buffer is fully determined by the tileset
+    # and grid dimensions, so build it once and `dup` per run instead of
+    # repeating the border-patch pass on every contradiction restart.
+    def build_initial_compatible_template
       n = @cells_count
       t_max = @num_tiles
       neighbours = @neighbours
@@ -304,7 +308,7 @@ module WaveFunctionCollapse
         c += 1
       end
 
-      @compatible = buf
+      @initial_compatible = buf.freeze
     end
 
     def rebuild_compatible_from_wave
