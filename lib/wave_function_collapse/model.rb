@@ -165,7 +165,6 @@ module WaveFunctionCollapse
 
       # Weights
       weights = ::Array.new(t_max)
-      log_weights = ::Array.new(t_max)
       weights_log_weights = ::Array.new(t_max)
       sum_w = 0.0
       sum_w_log_w = 0.0
@@ -173,11 +172,10 @@ module WaveFunctionCollapse
       while t < t_max
         w = tiles[t].probability.to_f
         weights[t] = w
-        lw = ::Math.log(w)
-        log_weights[t] = lw
-        weights_log_weights[t] = w * lw
+        wlogw = w * ::Math.log(w)
+        weights_log_weights[t] = wlogw
         sum_w += w
-        sum_w_log_w += w * lw
+        sum_w_log_w += wlogw
         t += 1
       end
       @weights = weights.freeze
