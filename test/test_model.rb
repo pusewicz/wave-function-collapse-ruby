@@ -72,6 +72,16 @@ class TestModel < Minitest::Test
     assert_equal 3, model.entropy_at(2, 2)
   end
 
+  def test_prepend_empty_row_fills_chosen_tile_for_single_tile_set
+    # With a single-tile tileset every cell is already collapsed, so the
+    # new row inserted by prepend_empty_row must materialise tile 0 in
+    # `grid` — not return nil because chosen_tile is still -1.
+    tiles = [Tile.new(tileid: 42, wangid: [0, 0, 0, 0, 0, 0, 0, 0])]
+    model = Model.new(tiles, 2, 2)
+    model.prepend_empty_row
+    model.grid.each { |col| col.each { |t| assert_equal 42, t.tileid } }
+  end
+
   def test_rejects_tileset_that_overflows_supporter_byte
     # Supporter counts are stored as bytes (0..255). 256 mutually-compatible
     # tiles would wrap and silently corrupt the wave; reject up front.

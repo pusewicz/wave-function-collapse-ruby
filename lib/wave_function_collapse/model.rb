@@ -87,7 +87,12 @@ module WaveFunctionCollapse
       shift_uniform!(@sum_w, shift_count, @initial_sum_w)
       shift_uniform!(@sum_w_log_w, shift_count, @initial_sum_w_log_w)
       shift_uniform!(@entropies, shift_count, @initial_entropy)
-      shift_uniform!(@chosen_tile, shift_count, -1)
+      # When the tileset has a single tile every cell is born collapsed,
+      # so the new row's chosen_tile must point at tile 0 rather than the
+      # generic "uncollapsed" sentinel — mirroring the t_max==1 branch in
+      # setup_wave_state. Without this, complete? returns true (because
+      # remaining[c] == 1) while grid returns nil for the whole new row.
+      shift_uniform!(@chosen_tile, shift_count, (@num_tiles == 1) ? 0 : -1)
 
       noise = @noise
       i = 0
