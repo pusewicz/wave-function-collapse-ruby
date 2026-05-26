@@ -221,7 +221,16 @@ module WaveFunctionCollapse
       @entropies = ::Array.new(n, @initial_entropy)
       @noise = ::Array.new(n) { ::Kernel.rand * 1e-6 }
       @chosen_tile = ::Array.new(n, -1)
-      @uncollapsed_count = n
+      # When the tileset has a single tile every cell is born collapsed,
+      # so `complete?` must report true immediately. Fill `@chosen_tile`
+      # for any cell whose wave already has exactly one bit and count
+      # only the genuinely undetermined cells.
+      if t_max == 1
+        @chosen_tile.fill(0)
+        @uncollapsed_count = 0
+      else
+        @uncollapsed_count = n
+      end
       @contradiction = false
       @prop_cells.clear
       @prop_tiles.clear
