@@ -193,7 +193,11 @@ module WaveFunctionCollapse
       while t < t_max
         w = tiles[t].probability.to_f
         weights[t] = w
-        wlogw = w * ::Math.log(w)
+        # `w * Math.log(w)` is NaN for w == 0 (since 0 * -Infinity = NaN),
+        # which would then propagate into every cell's entropy and make
+        # `find_lowest_entropy_cell` return nothing forever. The limit
+        # lim_{w→0} w*log(w) is 0, so use that.
+        wlogw = (w == 0.0) ? 0.0 : w * ::Math.log(w)
         weights_log_weights[t] = wlogw
         sum_w += w
         sum_w_log_w += wlogw

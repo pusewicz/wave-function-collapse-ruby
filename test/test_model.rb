@@ -71,4 +71,18 @@ class TestModel < Minitest::Test
     assert_equal 3, model.entropy_at(1, 2)
     assert_equal 3, model.entropy_at(2, 2)
   end
+
+  def test_zero_probability_tile_does_not_poison_entropy
+    # `w * Math.log(w)` is NaN for w == 0; if that leaks into the entropy
+    # table, `find_lowest_entropy_cell` never picks a cell and the solve
+    # loop spins forever. Regression for the bug found by /pr-bug-hunt.
+    tiles = [
+      Tile.new(tileid: 0, wangid: [0, 0, 0, 0, 0, 0, 0, 0], probability: 1.0),
+      Tile.new(tileid: 1, wangid: [0, 0, 0, 0, 0, 0, 0, 0], probability: 0.0)
+    ]
+    model = Model.new(tiles, 2, 2)
+    model.iterate until model.complete?
+    assert model.complete?
+    model.grid.each { |col| col.each { |t| refute_nil t } }
+  end
 end
