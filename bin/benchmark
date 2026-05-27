@@ -77,23 +77,45 @@ puts RUBY_DESCRIPTION
 puts "Tiles loaded: #{tiles.size}, YJIT=#{yjit_status}"
 puts
 
-legacy_sizes = (ENV["LEGACY_SIZES"] || "10,15,20,25,30").split(",").map(&:to_i)
-new_sizes = (ENV["NEW_SIZES"] || "10,15,20,30,50,75,100").split(",").map(&:to_i)
+# Accepts either "N" (treated as NxN) or "WxH" entries.
+def parse_sizes(str)
+  str.split(",").map do |tok|
+    tok = tok.strip
+    if tok.include?("x")
+      w, h = tok.split("x", 2).map(&:to_i)
+      [w, h]
+    else
+      n = tok.to_i
+      [n, n]
+    end
+  end
+end
+
+# SIZES overrides both lists. Otherwise each model uses its own *_SIZES var if
+# set, or falls back to the other model's setting, or finally its own default.
+shared = ENV["SIZES"]
+legacy_env = ENV["LEGACY_SIZES"]
+new_env = ENV["NEW_SIZES"]
+legacy_sizes = parse_sizes(shared || legacy_env || new_env || "10,15,20,25,30")
+new_sizes = parse_sizes(shared || new_env || legacy_env || "10,15,20,30,50,64x36,75,100")
 runs = Integer(ENV["RUNS"] || "3")
 skip_legacy = ARGV.include?("--no-legacy")
 show_gc = ENV["GC_STATS"]
 
+# Header widths match the data printf below so columns align.
+# Data: "%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d" (+ GC: %12d %14d %8d %8d)
+# %9.3fs renders as 10 chars (9 numeric + literal 's').
 if show_gc
-  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s %-12s %-14s %-8s %-8s\n",
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s %12s %14s %8s %8s\n",
     "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters",
     "Alloc/run", "Malloc B/run", "MinorGC", "MajorGC")
-  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s %-12s %-14s %-8s %-8s\n",
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s %12s %14s %8s %8s\n",
     "-----", "----", "-----", "------", "----", "-------", "-----",
     "---------", "------------", "-------", "-------")
 else
-  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s\n",
     "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters")
-  printf("%-8s %-9s %-7s %-10s %-10s %-12s %-10s\n",
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s\n",
     "-----", "----", "-----", "------", "----", "-------", "-----")
 end
 
@@ -101,13 +123,17 @@ end
   [WaveFunctionCollapse::LegacyModel, skip_legacy ? [] : legacy_sizes, "Legacy"],
   [WaveFunctionCollapse::Model, new_sizes, "New"]
 ].each do |klass, sizes, label|
-  sizes.each do |s|
+  sizes.each do |(w, h)|
+    cells = w * h
+    grid = "#{w}x#{h}"
+    printf("%-8s %-9s %-7d ", label, grid, cells)
+    $stdout.flush
     times = []
     iters_seen = 0
     gc_deltas = []
     runs.times do |r|
-      srand(s * 1000 + r + 1)
-      elapsed, iters, gc = run_once(klass, tiles, s, s)
+      srand(cells * 1000 + r + 1)
+      elapsed, iters, gc = run_once(klass, tiles, w, h)
       times << elapsed
       iters_seen = iters
       gc_deltas << gc
@@ -116,13 +142,13 @@ end
     best = times.min
     if show_gc
       avg = ->(k) { gc_deltas.sum { |g| g[k] } / gc_deltas.size }
-      printf("%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d %12d %14d %8d %8d\n",
-        label, "#{s}x#{s}", s * s, med, best, iters_seen / med, iters_seen,
+      printf("%9.3fs %9.3fs %12.0f %10d %12d %14d %8d %8d\n",
+        med, best, iters_seen / med, iters_seen,
         avg.call(:total_allocated_objects), avg.call(:malloc_increase_bytes),
         avg.call(:minor_gc_count), avg.call(:major_gc_count))
     else
-      printf("%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d\n",
-        label, "#{s}x#{s}", s * s, med, best, iters_seen / med, iters_seen)
+      printf("%9.3fs %9.3fs %12.0f %10d\n",
+        med, best, iters_seen / med, iters_seen)
     end
   end
   puts
