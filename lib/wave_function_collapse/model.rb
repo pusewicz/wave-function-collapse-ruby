@@ -21,7 +21,7 @@ module WaveFunctionCollapse
     # otherwise loop forever.
     MAX_RESTARTS = 100
 
-    attr_reader :tiles, :width, :height, :max_entropy
+    attr_reader :tiles, :width, :height, :max_entropy, :generation
 
     def initialize(tiles, width, height)
       @tiles = tiles
@@ -30,6 +30,7 @@ module WaveFunctionCollapse
       @num_tiles = tiles.length
       @max_entropy = @num_tiles
       @cells_count = @width * @height
+      @generation = 0
 
       build_propagator
       build_initial_state
@@ -54,6 +55,13 @@ module WaveFunctionCollapse
 
     def entropy_at(x, y)
       @remaining[y * @width + x]
+    end
+
+    # Tileset asset id (Integer) at (x, y), or nil if uncollapsed. Lighter
+    # than `tile_at` for hot draw paths that only need the asset id.
+    def tile_id_at(x, y)
+      t = @chosen_tile[y * @width + x]
+      t < 0 ? nil : @tiles[t].tileid
     end
 
     def solve
@@ -132,6 +140,7 @@ module WaveFunctionCollapse
         setup_wave_state
         return false
       end
+      @generation += 1
       true
     end
 
@@ -369,6 +378,7 @@ module WaveFunctionCollapse
       @compatible.replace(@initial_compatible)
       orphan_ban_pass
       propagate
+      @generation += 1
     end
 
     # The initial supporter-count buffer is fully determined by the tileset
@@ -494,6 +504,7 @@ module WaveFunctionCollapse
           setup_wave_state
           next
         end
+        @generation += 1
         return true
       end
     end
