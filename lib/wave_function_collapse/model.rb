@@ -112,7 +112,6 @@ module WaveFunctionCollapse
       shift_uniform!(@remaining, shift_count, @num_tiles)
       shift_uniform!(@sum_w, shift_count, @initial_sum_w)
       shift_uniform!(@sum_w_log_w, shift_count, @initial_sum_w_log_w)
-      shift_uniform!(@entropies, shift_count, @initial_entropy)
       # When the tileset has a single tile every cell is born collapsed,
       # so the new row's chosen_tile must point at tile 0 rather than the
       # generic "uncollapsed" sentinel — mirroring the t_max==1 branch in
@@ -121,13 +120,22 @@ module WaveFunctionCollapse
       shift_uniform!(@chosen_tile, shift_count, (@num_tiles == 1) ? 0 : -1)
 
       noise = @noise
+      entropy_noise = @entropy_noise
+      initial_entropy = @initial_entropy
       i = 0
+      # Carry both the noise and the merged `entropy + noise` value down
+      # so existing rows keep their evolved entropies, then mint fresh
+      # noise (and corresponding initial entropy_noise) for the new top
+      # rows.
       while i < shift_count
         noise[i] = noise[i + w]
+        entropy_noise[i] = entropy_noise[i + w]
         i += 1
       end
       while i < n
-        noise[i] = ::Kernel.rand * 1e-6
+        nz = ::Kernel.rand * 1e-6
+        noise[i] = nz
+        entropy_noise[i] = initial_entropy + nz
         i += 1
       end
 
@@ -335,7 +343,12 @@ module WaveFunctionCollapse
       @remaining = ::Array.new(n)
       @sum_w = ::Array.new(n)
       @sum_w_log_w = ::Array.new(n)
-      @entropies = ::Array.new(n)
+      # `entropy + noise` for find_lowest_entropy_cell. Maintained
+      # eagerly on every ban so the lowest-entropy scan reads a single
+      # array. Noise (jitter for tie-breaking) is baked in once at setup
+      # and stays constant per cell for the run, so the addition only
+      # has to happen when the entropy itself changes.
+      @entropy_noise = ::Array.new(n)
       @noise = ::Array.new(n)
       @chosen_tile = ::Array.new(n)
       build_neighbours
@@ -392,11 +405,15 @@ module WaveFunctionCollapse
       @remaining.fill(t_max)
       @sum_w.fill(@initial_sum_w)
       @sum_w_log_w.fill(@initial_sum_w_log_w)
-      @entropies.fill(@initial_entropy)
       @chosen_tile.fill(-1)
+      noise = @noise
+      entropy_noise = @entropy_noise
+      initial_entropy = @initial_entropy
       i = 0
       while i < n
-        @noise[i] = ::Kernel.rand * 1e-6
+        nz = ::Kernel.rand * 1e-6
+        noise[i] = nz
+        entropy_noise[i] = initial_entropy + nz
         i += 1
       end
       # When the tileset has a single tile every cell is born collapsed,
@@ -560,14 +577,13 @@ module WaveFunctionCollapse
     def find_lowest_entropy_cell
       n = @cells_count
       remaining = @remaining
-      entropies = @entropies
-      noise = @noise
+      entropy_noise = @entropy_noise
       best_c = -1
       best_e = ::Float::INFINITY
       c = 0
       while c < n
         if remaining[c] > 1
-          e = entropies[c] + noise[c]
+          e = entropy_noise[c]
           if e < best_e
             best_e = e
             best_c = c
@@ -661,7 +677,7 @@ module WaveFunctionCollapse
       end
 
       s = @sum_w[c]
-      @entropies[c] = ::Math.log(s) - @sum_w_log_w[c] / s
+      @entropy_noise[c] = ::Math.log(s) - @sum_w_log_w[c] / s + @noise[c]
 
       if r == 1
         @uncollapsed_count -= 1
@@ -696,7 +712,8 @@ module WaveFunctionCollapse
       remaining = @remaining
       sum_w = @sum_w
       sum_w_log_w = @sum_w_log_w
-      entropies = @entropies
+      entropy_noise = @entropy_noise
+      noise = @noise
       weights = @weights
       weights_log_weights = @weights_log_weights
       chosen_tile = @chosen_tile
@@ -752,7 +769,7 @@ module WaveFunctionCollapse
                       return
                     end
                     s = sum_w[nc]
-                    entropies[nc] = ::Math.log(s) - sum_w_log_w[nc] / s
+                    entropy_noise[nc] = ::Math.log(s) - sum_w_log_w[nc] / s + noise[nc]
                     if new_remaining == 1
                       @uncollapsed_count -= 1
                       chosen_tile[nc] = find_single_tile(nc)
