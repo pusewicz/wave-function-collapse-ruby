@@ -1,19 +1,26 @@
 # frozen_string_literal: true
 
 module WaveFunctionCollapse
-  # Wave Function Collapse — bitmask wave + AC-4 compatible counter.
+  # Wave Function Collapse — chunked-Fixnum wave + AC-4 compatible counter.
   #
-  # Each cell's domain is a single Integer bitmask (`@wave[c]`). Adjacency is
-  # precomputed as `@propagator[d][t]` masks and `@propagator_lists[d][t]`
-  # index arrays. Supporter counts are kept in a flat byte buffer
-  # (`@compatible`, addressed via `setbyte`/`getbyte`) — when a count hits
-  # zero the tile is banned at that cell, which kicks off iterative
-  # propagation through an explicit stack. Entropy is maintained
-  # incrementally per cell.
+  # Each cell's domain is split across `@chunk_count` parallel Fixnum arrays
+  # (`@wave_chunks[ch][c]`), each chunk holding up to `WAVE_CHUNK_BITS` tiles.
+  # Keeping every chunk a Fixnum lets the hot propagation loop AND a wave
+  # chunk with a precomputed `@propagator_chunks[d][t][ch]` mask and iterate
+  # the resulting set bits — no Bignum allocations on the inner path.
+  # Supporter counts live in a flat byte buffer (`@compatible`); when a count
+  # hits zero the tile is banned at that cell, which kicks off iterative
+  # propagation through an explicit stack. Entropy is maintained incrementally
+  # per cell.
   class Model
     DX = [0, 1, 0, -1].freeze
     DY = [1, 0, -1, 0].freeze
     OPP = [2, 3, 0, 1].freeze
+
+    # Bits per wave chunk. MRI's Fixnum holds 62 unsigned bits before
+    # promoting to Bignum, so 62 keeps every wave/propagator chunk in
+    # tagged-integer land and every `&`/`^`/`& -m`/`bit_length` op cheap.
+    WAVE_CHUNK_BITS = 62
 
     # Upper bound on consecutive contradiction restarts before
     # `observe_and_propagate` gives up. Solvable tilesets almost always
@@ -31,6 +38,7 @@ module WaveFunctionCollapse
       @max_entropy = @num_tiles
       @cells_count = @width * @height
       @generation = 0
+      @chunk_count = (@num_tiles + WAVE_CHUNK_BITS - 1) / WAVE_CHUNK_BITS
 
       build_propagator
       build_initial_state
@@ -96,7 +104,11 @@ module WaveFunctionCollapse
       # Shift state down in place: drop bottom row (cells 0..w-1), fill
       # the new top row with default values. Copying low-to-high is safe
       # because each source index (i + w) is greater than its destination.
-      shift_uniform!(@wave, shift_count, @full_mask)
+      ch = 0
+      while ch < @chunk_count
+        shift_uniform!(@wave_chunks[ch], shift_count, @full_chunk_masks[ch])
+        ch += 1
+      end
       shift_uniform!(@remaining, shift_count, @num_tiles)
       shift_uniform!(@sum_w, shift_count, @initial_sum_w)
       shift_uniform!(@sum_w_log_w, shift_count, @initial_sum_w_log_w)
@@ -167,6 +179,7 @@ module WaveFunctionCollapse
     def build_propagator
       tiles = @tiles
       t_max = @num_tiles
+      chunk_count = @chunk_count
 
       # Canonical integer ID per unique edge signature (Array of 3 ints).
       edge_id = {}
@@ -187,10 +200,15 @@ module WaveFunctionCollapse
       # Edge per (tile, direction). Index by direction id: 0=up,1=right,2=down,3=left.
       edges_per_dir = [ups, rights, downs, lefts]
 
-      # propagator[d][a] = bitmask of b such that match(a, d, b) — i.e.
-      # tile a's edge in dir d equals tile b's edge in opposite(d).
+      # propagator_chunks[d][a][ch] = Fixnum mask of tiles in chunk `ch`
+      # such that match(a, d, b) — i.e. tile a's edge in dir d equals
+      # tile b's edge in opposite(d). Also keep `propagator_counts[d][a]`
+      # = popcount of all chunks (initial supporter count for an interior
+      # cell). Bignum `propagator[d][a]` is built once for
+      # `rebuild_compatible_from_wave` (cold path) only.
       propagator = ::Array.new(4) { ::Array.new(t_max, 0) }
-      propagator_lists = ::Array.new(4) { ::Array.new(t_max) }
+      propagator_chunks = ::Array.new(4) { ::Array.new(t_max) { ::Array.new(chunk_count, 0) } }
+      propagator_counts = ::Array.new(4) { ::Array.new(t_max, 0) }
 
       d = 0
       while d < 4
@@ -201,40 +219,47 @@ module WaveFunctionCollapse
         while a < t_max
           my_edge = my_edges[a]
           mask = 0
-          list = []
+          count = 0
+          chunks = propagator_chunks[d][a]
           b = 0
           while b < t_max
             if opp_edges[b] == my_edge
               mask |= (1 << b)
-              list << b
+              ch = b / WAVE_CHUNK_BITS
+              chunks[ch] |= (1 << (b - ch * WAVE_CHUNK_BITS))
+              count += 1
             end
             b += 1
           end
           propagator[d][a] = mask
-          propagator_lists[d][a] = list.freeze
+          propagator_counts[d][a] = count
+          chunks.freeze
           a += 1
         end
         propagator[d].freeze
-        propagator_lists[d].freeze
+        propagator_chunks[d].each(&:freeze)
+        propagator_chunks[d].freeze
+        propagator_counts[d].freeze
         d += 1
       end
 
       @propagator = propagator.freeze
-      @propagator_lists = propagator_lists.freeze
+      @propagator_chunks = propagator_chunks.freeze
+      @propagator_counts = propagator_counts.freeze
 
       # Supporter counts live in a byte buffer (`@compatible`), so any
-      # propagator list above 255 entries would silently wrap modulo 256
-      # at build time and corrupt the AC-4 invariants — `complete?` can
+      # propagator count above 255 would silently wrap modulo 256 at
+      # build time and corrupt the AC-4 invariants — `complete?` can
       # even start returning true while the wave is actually contradicted.
       # Reject these tilesets up front rather than producing wrong output.
       d = 0
       while d < 4
         a = 0
         while a < t_max
-          if propagator_lists[d][a].length > 255
+          if propagator_counts[d][a] > 255
             ::Kernel.raise(
               ::WaveFunctionCollapse::Error,
-              "tile #{a} has #{propagator_lists[d][a].length} compatible " \
+              "tile #{a} has #{propagator_counts[d][a]} compatible " \
               "neighbours in direction #{d}; the byte-packed supporter " \
               "counter only fits 0..255"
             )
@@ -269,10 +294,18 @@ module WaveFunctionCollapse
       @initial_sum_w_log_w = sum_w_log_w
       @initial_entropy = ::Math.log(sum_w) - sum_w_log_w / sum_w
 
-      @full_mask = (1 << t_max) - 1
-      # Precomputed `1 << t` per tile — saves a Bignum allocation per
-      # propagation inner iteration and ban call.
-      @bit = ::Array.new(t_max) { |t| 1 << t }.freeze
+      # Per-tile chunk index + Fixnum bit-within-chunk mask. Used by `ban`
+      # and `observe`, where iteration is by absolute tile index.
+      @chunk_of = ::Array.new(t_max) { |i| i / WAVE_CHUNK_BITS }.freeze
+      @bit_in_chunk = ::Array.new(t_max) { |i| 1 << (i - (i / WAVE_CHUNK_BITS) * WAVE_CHUNK_BITS) }.freeze
+
+      # Full-domain mask per chunk. The last chunk only has `t_max %
+      # WAVE_CHUNK_BITS` tiles; everything else is 62 bits.
+      @full_chunk_masks = ::Array.new(chunk_count) { |ch|
+        bits = t_max - ch * WAVE_CHUNK_BITS
+        bits = WAVE_CHUNK_BITS if bits > WAVE_CHUNK_BITS
+        (1 << bits) - 1
+      }.freeze
 
       # Precompute the 4-byte-per-tile block representing an interior cell's
       # initial supporter counts (one byte per direction). Used to build the
@@ -282,10 +315,10 @@ module WaveFunctionCollapse
       t = 0
       while t < t_max
         base = t * 4
-        block.setbyte(base, propagator_lists[0][t].length)
-        block.setbyte(base + 1, propagator_lists[1][t].length)
-        block.setbyte(base + 2, propagator_lists[2][t].length)
-        block.setbyte(base + 3, propagator_lists[3][t].length)
+        block.setbyte(base, propagator_counts[0][t])
+        block.setbyte(base + 1, propagator_counts[1][t])
+        block.setbyte(base + 2, propagator_counts[2][t])
+        block.setbyte(base + 3, propagator_counts[3][t])
         t += 1
       end
       @interior_block = block.freeze
@@ -298,7 +331,7 @@ module WaveFunctionCollapse
       @prop_tiles = []
       # Pre-allocate per-cell state arrays once; setup_wave_state resets
       # them in place via Array#fill (no per-restart allocations).
-      @wave = ::Array.new(n)
+      @wave_chunks = ::Array.new(@chunk_count) { ::Array.new(n) }
       @remaining = ::Array.new(n)
       @sum_w = ::Array.new(n)
       @sum_w_log_w = ::Array.new(n)
@@ -351,7 +384,11 @@ module WaveFunctionCollapse
 
       # Reset per-cell state in place — buffers are pre-allocated in
       # build_initial_state, so contradiction restarts don't churn the GC.
-      @wave.fill(@full_mask)
+      ch = 0
+      while ch < @chunk_count
+        @wave_chunks[ch].fill(@full_chunk_masks[ch])
+        ch += 1
+      end
       @remaining.fill(t_max)
       @sum_w.fill(@initial_sum_w)
       @sum_w_log_w.fill(@initial_sum_w_log_w)
@@ -426,8 +463,9 @@ module WaveFunctionCollapse
       n = @cells_count
       t_max = @num_tiles
       neighbours = @neighbours
-      propagator = @propagator
-      wave = @wave
+      propagator_chunks = @propagator_chunks
+      wave_chunks = @wave_chunks
+      chunk_count = @chunk_count
       buf = @compatible
 
       buf.replace(@compatible_fill)
@@ -438,10 +476,14 @@ module WaveFunctionCollapse
         while d < 4
           nc = neighbours[c * 4 + d]
           if nc >= 0
-            wmask = wave[nc]
             t = 0
             while t < t_max
-              cnt = popcount(propagator[d][t] & wmask)
+              cnt = 0
+              ch = 0
+              while ch < chunk_count
+                cnt += popcount(propagator_chunks[d][t][ch] & wave_chunks[ch][nc])
+                ch += 1
+              end
               cnt = 255 if cnt > 255
               buf.setbyte((c * t_max + t) * 4 + d, cnt)
               t += 1
@@ -457,23 +499,29 @@ module WaveFunctionCollapse
       n = @cells_count
       t_max = @num_tiles
       compatible = @compatible
-      wave = @wave
-      bit_table = @bit
+      wave_chunks = @wave_chunks
+      chunk_count = @chunk_count
 
       c = 0
       while c < n
-        t = 0
-        while t < t_max
-          if (wave[c] & bit_table[t]) != 0
-            base = (c * t_max + t) * 4
+        base_c = c * t_max * 4
+        ch = 0
+        while ch < chunk_count
+          v = wave_chunks[ch][c]
+          tile_offset = ch * WAVE_CHUNK_BITS
+          while v != 0
+            lowest = v & -v
+            t = tile_offset + lowest.bit_length - 1
+            base = base_c + (t << 2)
             if compatible.getbyte(base) == 0 ||
                 compatible.getbyte(base + 1) == 0 ||
                 compatible.getbyte(base + 2) == 0 ||
                 compatible.getbyte(base + 3) == 0
               ban(c, t)
             end
+            v ^= lowest
           end
-          t += 1
+          ch += 1
         end
         c += 1
       end
@@ -531,55 +579,74 @@ module WaveFunctionCollapse
     end
 
     def observe(c)
-      wmask = @wave[c]
       total = @sum_w[c]
       r = ::Kernel.rand * total
 
       weights = @weights
-      bit_table = @bit
-      t_max = @num_tiles
+      wave_chunks = @wave_chunks
+      chunk_count = @chunk_count
+
       chosen = -1
-      t = 0
-      while t < t_max
-        if (wmask & bit_table[t]) != 0
+      ch = 0
+      while ch < chunk_count
+        v = wave_chunks[ch][c]
+        tile_offset = ch * WAVE_CHUNK_BITS
+        while v != 0
+          lowest = v & -v
+          t = tile_offset + lowest.bit_length - 1
           r -= weights[t]
           if r <= 0
             chosen = t
             break
           end
+          v ^= lowest
         end
-        t += 1
+        break if chosen >= 0
+        ch += 1
       end
 
       if chosen < 0
-        # Floating-point edge: pick the last set bit in wmask.
-        t = t_max - 1
-        while t >= 0
-          if (wmask & bit_table[t]) != 0
-            chosen = t
+        # Floating-point edge: pick the highest set bit across chunks.
+        ch = chunk_count - 1
+        while ch >= 0
+          v = wave_chunks[ch][c]
+          if v != 0
+            chosen = ch * WAVE_CHUNK_BITS + v.bit_length - 1
             break
           end
-          t -= 1
+          ch -= 1
         end
       end
 
-      # Ban every other tile at this cell.
-      t = 0
-      while t < t_max
-        if t != chosen && (wmask & bit_table[t]) != 0
-          ban(c, t)
-          return if @contradiction
+      # Ban every other tile at this cell. Snapshot chunks before iterating
+      # because `ban` mutates them in place — we want to ban every tile that
+      # was alive *before* this observation, not the shrinking set.
+      ch = 0
+      while ch < chunk_count
+        v = wave_chunks[ch][c]
+        tile_offset = ch * WAVE_CHUNK_BITS
+        while v != 0
+          lowest = v & -v
+          t = tile_offset + lowest.bit_length - 1
+          if t != chosen
+            ban(c, t)
+            return if @contradiction
+          end
+          v ^= lowest
         end
-        t += 1
+        ch += 1
       end
     end
 
     def ban(c, t)
-      bit = @bit[t]
-      wave = @wave
-      return if (wave[c] & bit) == 0
+      ch = @chunk_of[t]
+      b = @bit_in_chunk[t]
+      wave_ch = @wave_chunks[ch]
+      v = wave_ch[c]
+      return if (v & b) == 0
 
-      wave[c] = wave[c] ^ bit
+      v ^= b
+      wave_ch[c] = v
       @remaining[c] -= 1
 
       w = @weights[t]
@@ -598,23 +665,32 @@ module WaveFunctionCollapse
 
       if r == 1
         @uncollapsed_count -= 1
-        # Single bit left — `bit_length` returns its position + 1, so
-        # subtracting one gives the tile index in O(1) instead of
-        # scanning the mask bit by bit.
-        @chosen_tile[c] = wave[c].bit_length - 1
+        @chosen_tile[c] = find_single_tile(c)
       end
 
       @prop_cells.push(c)
       @prop_tiles.push(t)
     end
 
+    # Locate the single remaining tile across `@wave_chunks` for cell `c`.
+    # Only called when `@remaining[c]` just dropped to 1, so exactly one
+    # chunk has a non-zero entry with a single set bit.
+    def find_single_tile(c)
+      ch = @chunk_count - 1
+      while ch >= 0
+        v = @wave_chunks[ch][c]
+        return ch * WAVE_CHUNK_BITS + v.bit_length - 1 if v != 0
+        ch -= 1
+      end
+      -1
+    end
+
     def propagate
       prop_cells = @prop_cells
       prop_tiles = @prop_tiles
-      propagator_lists = @propagator_lists
+      propagator_chunks = @propagator_chunks
       compatible = @compatible
-      wave = @wave
-      bit_table = @bit
+      wave_chunks = @wave_chunks
       neighbours = @neighbours
       t_max = @num_tiles
       remaining = @remaining
@@ -624,57 +700,70 @@ module WaveFunctionCollapse
       weights = @weights
       weights_log_weights = @weights_log_weights
       chosen_tile = @chosen_tile
+      chunk_count = @chunk_count
+      t_max4 = t_max * 4
+      chunk_bits = WAVE_CHUNK_BITS
 
       until prop_cells.empty?
         return if @contradiction
         t = prop_tiles.pop
         c = prop_cells.pop
+        c4 = c * 4
+        prop_dir = propagator_chunks
 
         d = 0
         while d < 4
-          nc = neighbours[c * 4 + d]
+          nc = neighbours[c4 + d]
           if nc >= 0
-            list = propagator_lists[d][t]
             opp_d = OPP[d]
-            i = 0
-            len = list.length
-            while i < len
-              tp = list[i]
-              bit_tp = bit_table[tp]
-              # Skip tiles already banned at the neighbour — decrementing
-              # their supporter count would silently wrap past zero and
-              # waste work.
-              if (wave[nc] & bit_tp) != 0
-                idx = (nc * t_max + tp) * 4 + opp_d
-                count = compatible.getbyte(idx) - 1
-                compatible.setbyte(idx, count)
-                if count == 0
-                  # Inlined fast-path of `ban(nc, tp)`. We already know
-                  # `bit_tp` is set in `wave[nc]` from the check above,
-                  # so the redundant gate in `ban` is skipped. The same
-                  # state updates run; `ban` itself stays callable for
-                  # `orphan_ban_pass` and `observe` where the gate is
-                  # still needed.
-                  wave[nc] = wave[nc] ^ bit_tp
-                  new_remaining = remaining[nc] - 1
-                  remaining[nc] = new_remaining
-                  sum_w[nc] -= weights[tp]
-                  sum_w_log_w[nc] -= weights_log_weights[tp]
-                  if new_remaining == 0
-                    @contradiction = true
-                    return
+            nc_base = nc * t_max4 + opp_d
+            prop_dt = prop_dir[d][t]
+
+            ch = 0
+            while ch < chunk_count
+              prop_mask = prop_dt[ch]
+              if prop_mask != 0
+                wave_ch = wave_chunks[ch]
+                # Intersection: tiles that are both still alive at the
+                # neighbour and compatible with originating tile t in
+                # direction d. Iterating set bits of `m` walks exactly
+                # the tiles that need a supporter-count decrement — no
+                # per-tile bit test, no work for already-banned tiles.
+                m = wave_ch[nc] & prop_mask
+                tile_offset = ch * chunk_bits
+                while m != 0
+                  lowest = m & -m
+                  tp = tile_offset + lowest.bit_length - 1
+                  idx = nc_base + (tp << 2)
+                  count = compatible.getbyte(idx) - 1
+                  compatible.setbyte(idx, count)
+                  if count == 0
+                    # Inlined fast-path of `ban(nc, tp)`. We know the bit
+                    # is set in this chunk (from the intersection), so
+                    # XOR-clearing it is correct without re-testing.
+                    new_chunk = wave_ch[nc] ^ lowest
+                    wave_ch[nc] = new_chunk
+                    new_remaining = remaining[nc] - 1
+                    remaining[nc] = new_remaining
+                    sum_w[nc] -= weights[tp]
+                    sum_w_log_w[nc] -= weights_log_weights[tp]
+                    if new_remaining == 0
+                      @contradiction = true
+                      return
+                    end
+                    s = sum_w[nc]
+                    entropies[nc] = ::Math.log(s) - sum_w_log_w[nc] / s
+                    if new_remaining == 1
+                      @uncollapsed_count -= 1
+                      chosen_tile[nc] = find_single_tile(nc)
+                    end
+                    prop_cells.push(nc)
+                    prop_tiles.push(tp)
                   end
-                  s = sum_w[nc]
-                  entropies[nc] = ::Math.log(s) - sum_w_log_w[nc] / s
-                  if new_remaining == 1
-                    @uncollapsed_count -= 1
-                    chosen_tile[nc] = wave[nc].bit_length - 1
-                  end
-                  prop_cells.push(nc)
-                  prop_tiles.push(tp)
+                  m ^= lowest
                 end
               end
-              i += 1
+              ch += 1
             end
           end
           d += 1
