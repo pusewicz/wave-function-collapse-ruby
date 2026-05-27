@@ -15,6 +15,12 @@ module WaveFunctionCollapse
     DY = [1, 0, -1, 0].freeze
     OPP = [2, 3, 0, 1].freeze
 
+    # Upper bound on consecutive contradiction restarts before
+    # `observe_and_propagate` gives up. Solvable tilesets almost always
+    # succeed in one or two attempts; inherently-broken inputs would
+    # otherwise loop forever.
+    MAX_RESTARTS = 100
+
     attr_reader :tiles, :width, :height, :max_entropy
 
     def initialize(tiles, width, height)
@@ -466,6 +472,7 @@ module WaveFunctionCollapse
     # ---- core observe / ban / propagate -----------------------------------------
 
     def observe_and_propagate
+      restarts = 0
       loop do
         c = find_lowest_entropy_cell
         return false unless c
@@ -474,6 +481,15 @@ module WaveFunctionCollapse
         propagate
 
         if @contradiction
+          restarts += 1
+          if restarts > MAX_RESTARTS
+            ::Kernel.raise(
+              ::WaveFunctionCollapse::Error,
+              "exceeded #{MAX_RESTARTS} consecutive contradiction " \
+              "restarts; the tileset may be inherently unsolvable on " \
+              "this grid"
+            )
+          end
           # Restart: rebuild wave state and try again.
           setup_wave_state
           next

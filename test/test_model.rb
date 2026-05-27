@@ -89,6 +89,28 @@ class TestModel < Minitest::Test
     assert_raises(WaveFunctionCollapse::Error) { Model.new(tiles, 2, 1) }
   end
 
+  def test_observe_and_propagate_caps_consecutive_restarts
+    # If the tileset is inherently unsolvable but orphan_ban_pass leaves
+    # some cells with multiple candidates, the solver would otherwise
+    # cycle observe → contradiction → setup_wave_state forever. Force
+    # that condition by overriding setup_wave_state to always end in a
+    # contradiction state, and verify the cap fires instead of hanging.
+    klass = Class.new(Model) do
+      def setup_wave_state
+        super
+        @contradiction = true
+      end
+    end
+    tiles = [
+      Tile.new(tileid: 0, wangid: [0, 0, 0, 0, 0, 0, 0, 0]),
+      Tile.new(tileid: 1, wangid: [0, 0, 0, 0, 0, 0, 0, 0])
+    ]
+    model = klass.new(tiles, 2, 2)
+    assert_raises(WaveFunctionCollapse::Error) do
+      model.iterate until model.complete?
+    end
+  end
+
   def test_zero_probability_tile_does_not_poison_entropy
     # `w * Math.log(w)` is NaN for w == 0; if that leaks into the entropy
     # table, `find_lowest_entropy_cell` never picks a cell and the solve
