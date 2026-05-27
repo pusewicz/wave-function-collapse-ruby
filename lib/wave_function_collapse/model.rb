@@ -315,21 +315,6 @@ module WaveFunctionCollapse
         (1 << bits) - 1
       }.freeze
 
-      # Precompute the 4-byte-per-tile block representing an interior cell's
-      # initial supporter counts (one byte per direction). Used to build the
-      # @compatible buffer quickly. Sized via a single fill string, then
-      # written by setbyte — avoids 4*t_max one-byte `.chr` allocations.
-      block = "\x00".b * (t_max * 4)
-      t = 0
-      while t < t_max
-        base = t * 4
-        block.setbyte(base, propagator_counts[0][t])
-        block.setbyte(base + 1, propagator_counts[1][t])
-        block.setbyte(base + 2, propagator_counts[2][t])
-        block.setbyte(base + 3, propagator_counts[3][t])
-        t += 1
-      end
-      @interior_block = block.freeze
     end
 
     def build_initial_state
@@ -353,11 +338,16 @@ module WaveFunctionCollapse
       @chosen_tile = ::Array.new(n)
       build_neighbours
       build_initial_compatible_template
-      # Persistent supporter-count buffer: sized once, reset via
-      # String#replace on every restart so we never allocate a fresh
-      # n*t_max*4-byte String on a contradiction.
-      @compatible = ::String.new(capacity: @cells_count * @num_tiles * 4, encoding: ::Encoding::BINARY)
-      @compatible << @initial_compatible
+      # Supporter-count storage. Split per direction so the inner
+      # propagation loop can index by a flat `(c * t_max + t)` integer
+      # (no `<<2`, no `+ opp_d`). Each is pre-allocated and reset in
+      # place via Array#replace on every restart — no per-restart
+      # allocations.
+      @compatible_per_dir = ::Array.new(4) { ::Array.new(@cells_count * @num_tiles) }
+      # Same arrays in OPP order so the propagation loop can do a single
+      # array lookup per direction (`compatible_per_opp[d]`) rather than
+      # `compatible_per_dir[OPP[d]]` — two Array#[] reads per direction.
+      @compatible_per_opp = OPP.map { |opp_d| @compatible_per_dir[opp_d] }.freeze
     end
 
     # Precompute the neighbour cell index for every (cell, direction) pair,
@@ -429,51 +419,56 @@ module WaveFunctionCollapse
       @prop_cells.clear
       @prop_tiles.clear
 
-      @compatible.replace(@initial_compatible)
+      d = 0
+      while d < 4
+        @compatible_per_dir[d].replace(@initial_compatible_per_dir[d])
+        d += 1
+      end
       orphan_ban_pass
       propagate
       @generation += 1
     end
 
-    # The initial supporter-count buffer is fully determined by the tileset
-    # and grid dimensions, so build it once and `dup` per run instead of
-    # repeating the border-patch pass on every contradiction restart.
+    # The initial supporter-count arrays are fully determined by the tileset
+    # and grid dimensions, so build them once and `replace` per run instead
+    # of repeating the border-patch pass on every contradiction restart.
+    # One Array per direction; index by `c * t_max + t`.
     def build_initial_compatible_template
       n = @cells_count
       t_max = @num_tiles
       neighbours = @neighbours
+      propagator_counts = @propagator_counts
 
-      buf = ::String.new(::String.new.b, capacity: n * t_max * 4)
-      buf.force_encoding(::Encoding::BINARY)
-      c = 0
-      while c < n
-        buf << @interior_block
-        c += 1
-      end
-
-      # Patch border cells: missing directions get sentinel 255.
-      c = 0
-      while c < n
-        d = 0
-        while d < 4
+      @initial_compatible_per_dir = ::Array.new(4) do |d|
+        counts = propagator_counts[d]
+        arr = ::Array.new(n * t_max)
+        c = 0
+        while c < n
+          base = c * t_max
           if neighbours[c * 4 + d] < 0
-            base = (c * t_max) * 4 + d
+            # Missing neighbour in this direction: sentinel 255 so
+            # `orphan_ban_pass` can't see a zero and incorrectly ban
+            # tiles at the boundary.
             t = 0
             while t < t_max
-              buf.setbyte(base + t * 4, 255)
+              arr[base + t] = 255
+              t += 1
+            end
+          else
+            t = 0
+            while t < t_max
+              arr[base + t] = counts[t]
               t += 1
             end
           end
-          d += 1
+          c += 1
         end
-        c += 1
+        arr.freeze
       end
-
-      @initial_compatible = buf.freeze
-      # Frozen 0xFF-filled sentinel of the same size, reused by
-      # rebuild_compatible_from_wave to clear @compatible in place
-      # without allocating an intermediate fill string.
-      @compatible_fill = ("\xff".b * (n * t_max * 4)).freeze
+      @initial_compatible_per_dir.freeze
+      # Sentinel 255-filled array reused by rebuild_compatible_from_wave
+      # to clear arrays in place without allocating an intermediate.
+      @compatible_fill = ::Array.new(n * t_max, 255).freeze
     end
 
     def rebuild_compatible_from_wave
@@ -483,9 +478,13 @@ module WaveFunctionCollapse
       propagator_chunks = @propagator_chunks
       wave_chunks = @wave_chunks
       chunk_count = @chunk_count
-      buf = @compatible
+      compatible_per_dir = @compatible_per_dir
 
-      buf.replace(@compatible_fill)
+      d = 0
+      while d < 4
+        compatible_per_dir[d].replace(@compatible_fill)
+        d += 1
+      end
 
       c = 0
       while c < n
@@ -493,6 +492,8 @@ module WaveFunctionCollapse
         while d < 4
           nc = neighbours[c * 4 + d]
           if nc >= 0
+            compat_d = compatible_per_dir[d]
+            base_c = c * t_max
             t = 0
             while t < t_max
               cnt = 0
@@ -502,7 +503,7 @@ module WaveFunctionCollapse
                 ch += 1
               end
               cnt = 255 if cnt > 255
-              buf.setbyte((c * t_max + t) * 4 + d, cnt)
+              compat_d[base_c + t] = cnt
               t += 1
             end
           end
@@ -515,13 +516,17 @@ module WaveFunctionCollapse
     def orphan_ban_pass
       n = @cells_count
       t_max = @num_tiles
-      compatible = @compatible
+      compatible_per_dir = @compatible_per_dir
+      compat_d0 = compatible_per_dir[0]
+      compat_d1 = compatible_per_dir[1]
+      compat_d2 = compatible_per_dir[2]
+      compat_d3 = compatible_per_dir[3]
       wave_chunks = @wave_chunks
       chunk_count = @chunk_count
 
       c = 0
       while c < n
-        base_c = c * t_max * 4
+        base_c = c * t_max
         ch = 0
         while ch < chunk_count
           v = wave_chunks[ch][c]
@@ -529,11 +534,11 @@ module WaveFunctionCollapse
           while v != 0
             lowest = v & -v
             t = tile_offset + lowest.bit_length - 1
-            base = base_c + (t << 2)
-            if compatible.getbyte(base) == 0 ||
-                compatible.getbyte(base + 1) == 0 ||
-                compatible.getbyte(base + 2) == 0 ||
-                compatible.getbyte(base + 3) == 0
+            base = base_c + t
+            if compat_d0[base] == 0 ||
+                compat_d1[base] == 0 ||
+                compat_d2[base] == 0 ||
+                compat_d3[base] == 0
               ban(c, t)
             end
             v ^= lowest
@@ -705,7 +710,7 @@ module WaveFunctionCollapse
       prop_cells = @prop_cells
       prop_tiles = @prop_tiles
       propagator_chunks = @propagator_chunks
-      compatible = @compatible
+      compatible_per_opp = @compatible_per_opp
       wave_chunks = @wave_chunks
       neighbours = @neighbours
       t_max = @num_tiles
@@ -718,7 +723,6 @@ module WaveFunctionCollapse
       weights_log_weights = @weights_log_weights
       chosen_tile = @chosen_tile
       chunk_count = @chunk_count
-      t_max4 = t_max * 4
       chunk_bits = WAVE_CHUNK_BITS
 
       until prop_cells.empty?
@@ -726,40 +730,44 @@ module WaveFunctionCollapse
         t = prop_tiles.pop
         c = prop_cells.pop
         c4 = c * 4
-        prop_dir = propagator_chunks
 
         d = 0
         while d < 4
           nc = neighbours[c4 + d]
           if nc >= 0
-            opp_d = OPP[d]
-            nc_base = nc * t_max4 + opp_d
-            prop_dt = prop_dir[d][t]
+            # Single Array indexed by `nc * t_max + tp` for this
+            # direction's supporter counts. Avoids the `<<2` + `+opp_d`
+            # arithmetic the interleaved-byte-buffer layout required.
+            compat = compatible_per_opp[d]
+            nc_base = nc * t_max
+            prop_dt = propagator_chunks[d][t]
 
             ch = 0
             while ch < chunk_count
               prop_mask = prop_dt[ch]
               if prop_mask != 0
                 wave_ch = wave_chunks[ch]
+                wnc = wave_ch[nc]
                 # Intersection: tiles that are both still alive at the
                 # neighbour and compatible with originating tile t in
                 # direction d. Iterating set bits of `m` walks exactly
-                # the tiles that need a supporter-count decrement — no
-                # per-tile bit test, no work for already-banned tiles.
-                m = wave_ch[nc] & prop_mask
+                # the tiles that need a supporter-count decrement.
+                m = wnc & prop_mask
                 tile_offset = ch * chunk_bits
+                nc_base_ch = nc_base + tile_offset
                 while m != 0
                   lowest = m & -m
-                  tp = tile_offset + lowest.bit_length - 1
-                  idx = nc_base + (tp << 2)
-                  count = compatible.getbyte(idx) - 1
-                  compatible.setbyte(idx, count)
+                  bit_pos = lowest.bit_length - 1
+                  idx = nc_base_ch + bit_pos
+                  count = compat[idx] - 1
+                  compat[idx] = count
                   if count == 0
                     # Inlined fast-path of `ban(nc, tp)`. We know the bit
                     # is set in this chunk (from the intersection), so
-                    # XOR-clearing it is correct without re-testing.
-                    new_chunk = wave_ch[nc] ^ lowest
-                    wave_ch[nc] = new_chunk
+                    # subtracting the single-bit `lowest` flips it off.
+                    wnc -= lowest
+                    wave_ch[nc] = wnc
+                    tp = tile_offset + bit_pos
                     new_remaining = remaining[nc] - 1
                     remaining[nc] = new_remaining
                     sum_w[nc] -= weights[tp]
@@ -777,7 +785,11 @@ module WaveFunctionCollapse
                     prop_cells.push(nc)
                     prop_tiles.push(tp)
                   end
-                  m ^= lowest
+                  # `m -= lowest` clears the lowest set bit (the bit we
+                  # just processed) without touching the others — same
+                  # effect as `m ^= lowest` but consistently faster in
+                  # the interpreter on this branch.
+                  m -= lowest
                 end
               end
               ch += 1
