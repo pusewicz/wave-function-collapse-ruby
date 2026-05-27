@@ -1,0 +1,113 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+require "json"
+require "wave_function_collapse"
+
+TILE_PATH = File.expand_path("../assets/map.tsj", __dir__)
+
+def build_tiles
+  json = JSON.load_file(TILE_PATH)
+  json["wangsets"].last["wangtiles"].map do |tile|
+    prob = json["tiles"]&.find { |t| t["id"] == tile["tileid"] }&.fetch("probability")
+    WaveFunctionCollapse::Tile.new(
+      tileid: tile["tileid"],
+      wangid: tile["wangid"],
+      probability: prob
+    )
+  end
+end
+
+GC_KEYS = %i[total_allocated_objects malloc_increase_bytes minor_gc_count major_gc_count].freeze
+
+def measure
+  GC.start
+  before_gc = GC.stat
+  before_shape = RubyVM.stat[:next_shape_id]
+  yield
+  after_gc = GC.stat
+  after_shape = RubyVM.stat[:next_shape_id]
+  out = {new_shapes: after_shape - before_shape}
+  GC_KEYS.each { |k| out[k] = after_gc[k] - before_gc[k] }
+  out
+end
+
+def median(xs)
+  s = xs.sort
+  n = s.length
+  n.odd? ? s[n / 2] : (s[n / 2 - 1] + s[n / 2]) / 2.0
+end
+
+def p95(xs)
+  s = xs.sort
+  s[(s.length * 0.95).ceil - 1] || s.last
+end
+
+WIDTH = Integer(ENV["WIDTH"] || 20)
+HEIGHT = Integer(ENV["HEIGHT"] || 20)
+RUNS = Integer(ENV["RUNS"] || 20)
+STREAM_ROWS = Integer(ENV["STREAM_ROWS"] || 50)
+
+tiles = build_tiles
+yjit_status = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? "on" : "off"
+puts RUBY_DESCRIPTION
+puts "Tiles loaded: #{tiles.size}, YJIT=#{yjit_status}"
+puts "Grid: #{WIDTH}x#{HEIGHT}, Runs: #{RUNS}, Stream rows: #{STREAM_ROWS}"
+puts
+
+# Section 1: cold solves — full lifecycle per sample.
+cold = RUNS.times.map do |i|
+  srand(WIDTH * 1000 + i + 1)
+  measure do
+    model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
+    model.solve
+    model.iterate until model.complete?
+  end
+end
+
+puts "== Cold solves (Model.new + solve to completion) =="
+GC_KEYS.each do |k|
+  xs = cold.map { |s| s[k] }
+  printf("  %-26s  median=%-12d  p95=%-12d  min=%-12d  max=%-12d\n",
+    k.to_s, median(xs), p95(xs), xs.min, xs.max)
+end
+shape_xs = cold.map { |s| s[:new_shapes] }
+printf("  %-26s  median=%-12d  p95=%-12d  min=%-12d  max=%-12d\n",
+  "new_shapes", median(shape_xs), p95(shape_xs), shape_xs.min, shape_xs.max)
+puts
+
+# Section 2: streaming via prepend_empty_row on a single model.
+srand(12345)
+model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
+model.solve
+model.iterate until model.complete?
+
+stream = STREAM_ROWS.times.map do
+  measure do
+    model.prepend_empty_row
+    model.iterate until model.complete?
+  end
+end
+
+puts "== Streaming (#{STREAM_ROWS} x prepend_empty_row + solve) =="
+GC_KEYS.each do |k|
+  xs = stream.map { |s| s[k] }
+  printf("  %-26s  median=%-12d  p95=%-12d  min=%-12d  max=%-12d\n",
+    k.to_s, median(xs), p95(xs), xs.min, xs.max)
+end
+shape_xs = stream.map { |s| s[:new_shapes] }
+printf("  %-26s  median=%-12d  p95=%-12d  min=%-12d  max=%-12d\n",
+  "new_shapes", median(shape_xs), p95(shape_xs), shape_xs.min, shape_xs.max)
+puts
+
+if ENV["JSON"]
+  payload = {
+    config: {width: WIDTH, height: HEIGHT, runs: RUNS, stream_rows: STREAM_ROWS},
+    cold: cold,
+    stream: stream
+  }
+  File.write(ENV["JSON"], JSON.dump(payload))
+  puts "Wrote raw samples to #{ENV["JSON"]}"
+end

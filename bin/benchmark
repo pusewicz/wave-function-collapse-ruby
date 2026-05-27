@@ -3,17 +3,13 @@
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
-require "benchmark"
 require "json"
 require "wave_function_collapse"
 
-WIDTH = 20
-HEIGHT = 20
+TILE_PATH = File.expand_path("../assets/map.tsj", __dir__)
 
-srand(WIDTH * HEIGHT)
-
-json = JSON.load_file!("assets/map.tsj")
-tiles =
+def build_tiles
+  json = JSON.load_file(TILE_PATH)
   json["wangsets"].last["wangtiles"].map do |tile|
     prob = json["tiles"]&.find { |t| t["id"] == tile["tileid"] }&.fetch("probability")
     WaveFunctionCollapse::Tile.new(
@@ -22,33 +18,139 @@ tiles =
       probability: prob
     )
   end
-times = []
+end
 
-puts RUBY_DESCRIPTION unless ENV["CI"]
+GC_STAT_KEYS = %i[total_allocated_objects malloc_increase_bytes minor_gc_count major_gc_count].freeze
 
-times = 10.times.map { |i|
-  time = Benchmark.realtime {
-    model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
-    print "Run ##{i + 1}: Benchmark for Model(grid=#{model.width}x#{model.height} entropy=#{model.max_entropy})… " unless ENV["CI"]
-    model.solve
-    until model.complete?
-      model.iterate
-    end
-  }
-  puts "Finished in #{time.round(2)}s" unless ENV["CI"]
-  time
-}
+def gc_delta(before, after)
+  GC_STAT_KEYS.each_with_object({}) { |k, h| h[k] = after[k] - before[k] }
+end
 
-average = times.sum / times.size
+def run_once(klass, tiles, w, h)
+  GC.start
+  gc_before = GC.stat
+  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  model = klass.new(tiles, w, h)
+  model.solve
+  iters = 1
+  until model.complete?
+    model.iterate
+    iters += 1
+  end
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+  gc_after = GC.stat
+  [elapsed, iters, gc_delta(gc_before, gc_after)]
+end
+
+def median(xs)
+  s = xs.sort
+  n = s.length
+  n.odd? ? s[n / 2] : (s[n / 2 - 1] + s[n / 2]) / 2.0
+end
+
+tiles = build_tiles
+
 if ENV["CI"]
+  # CI contract: 10 runs of 20x20 on the new Model, JSON output for the
+  # github-action-benchmark workflow. Do not change without updating the workflow.
+  WIDTH = 20
+  HEIGHT = 20
+  srand(WIDTH * HEIGHT)
+  times = 10.times.map {
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
+    model.solve
+    model.iterate until model.complete?
+    Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+  }
   puts JSON.dump([
-    { name: "Average time", unit: "Seconds", value: average },
-    { name: "Slowest time", unit: "Seconds", value: times.max },
-    { name: "Fastest time", unit: "Seconds", value: times.min },
-    { name: "P90", unit: "Seconds", value: times.sort[8] }
+    {name: "Average time", unit: "Seconds", value: times.sum / times.size},
+    {name: "Slowest time", unit: "Seconds", value: times.max},
+    {name: "Fastest time", unit: "Seconds", value: times.min},
+    {name: "P90", unit: "Seconds", value: times.sort[8]}
   ])
+  exit
+end
+
+yjit_status = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? "on" : "off"
+zjit_status = defined?(RubyVM::ZJIT) && RubyVM::ZJIT.enabled? ? "on" : "off"
+puts RUBY_DESCRIPTION
+puts "Tiles loaded: #{tiles.size}, YJIT=#{yjit_status}, ZJIT=#{zjit_status}"
+puts
+
+# Accepts either "N" (treated as NxN) or "WxH" entries.
+def parse_sizes(str)
+  str.split(",").map do |tok|
+    tok = tok.strip
+    if tok.include?("x")
+      w, h = tok.split("x", 2).map(&:to_i)
+      [w, h]
+    else
+      n = tok.to_i
+      [n, n]
+    end
+  end
+end
+
+# SIZES overrides both lists. Otherwise each model uses its own *_SIZES var if
+# set, or falls back to the other model's setting, or finally its own default.
+shared = ENV["SIZES"]
+legacy_env = ENV["LEGACY_SIZES"]
+new_env = ENV["NEW_SIZES"]
+legacy_sizes = parse_sizes(shared || legacy_env || new_env || "10,15,20,25,30")
+new_sizes = parse_sizes(shared || new_env || legacy_env || "10,15,20,30,50,64x36,75,100")
+runs = Integer(ENV["RUNS"] || "3")
+skip_legacy = ARGV.include?("--no-legacy")
+show_gc = ENV["GC_STATS"]
+
+# Header widths match the data printf below so columns align.
+# Data: "%-8s %-9s %-7d %9.3fs %9.3fs %12.0f %10d" (+ GC: %12d %14d %8d %8d)
+# %9.3fs renders as 10 chars (9 numeric + literal 's').
+if show_gc
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s %12s %14s %8s %8s\n",
+    "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters",
+    "Alloc/run", "Malloc B/run", "MinorGC", "MajorGC")
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s %12s %14s %8s %8s\n",
+    "-----", "----", "-----", "------", "----", "-------", "-----",
+    "---------", "------------", "-------", "-------")
 else
-  puts "Average time: #{average}"
-  puts "Slowest time: #{times.max}"
-  puts "Fastest time: #{times.min}"
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s\n",
+    "Model", "Grid", "Cells", "Median", "Best", "Obs/sec", "Iters")
+  printf("%-8s %-9s %-7s %10s %10s %12s %10s\n",
+    "-----", "----", "-----", "------", "----", "-------", "-----")
+end
+
+[
+  [WaveFunctionCollapse::LegacyModel, skip_legacy ? [] : legacy_sizes, "Legacy"],
+  [WaveFunctionCollapse::Model, new_sizes, "New"]
+].each do |klass, sizes, label|
+  sizes.each do |(w, h)|
+    cells = w * h
+    grid = "#{w}x#{h}"
+    printf("%-8s %-9s %-7d ", label, grid, cells)
+    $stdout.flush
+    times = []
+    iters_seen = 0
+    gc_deltas = []
+    runs.times do |r|
+      srand(cells * 1000 + r + 1)
+      elapsed, iters, gc = run_once(klass, tiles, w, h)
+      times << elapsed
+      iters_seen = iters
+      gc_deltas << gc
+    end
+    med = median(times)
+    best = times.min
+    if show_gc
+      avg = ->(k) { gc_deltas.sum { |g| g[k] } / gc_deltas.size }
+      printf("%9.3fs %9.3fs %12.0f %10d %12d %14d %8d %8d\n",
+        med, best, iters_seen / med, iters_seen,
+        avg.call(:total_allocated_objects), avg.call(:malloc_increase_bytes),
+        avg.call(:minor_gc_count), avg.call(:major_gc_count))
+    else
+      printf("%9.3fs %9.3fs %12.0f %10d\n",
+        med, best, iters_seen / med, iters_seen)
+    end
+  end
+  puts
 end

@@ -1,0 +1,40 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+
+require "json"
+require "wave_function_collapse"
+require "ruby-prof"
+
+WIDTH = 20
+HEIGHT = 20
+
+srand(WIDTH * HEIGHT)
+
+json = JSON.load_file!("assets/map.tsj")
+tiles =
+  json["wangsets"].last["wangtiles"].map do |tile|
+    prob = json["tiles"]&.find { |t| t["id"] == tile["tileid"] }&.fetch("probability")
+    WaveFunctionCollapse::Tile.new(
+      tileid: tile["tileid"],
+      wangid: tile["wangid"],
+      probability: prob
+    )
+  end
+
+# Profile
+profile = RubyProf::Profile.new
+profile.start
+
+model = WaveFunctionCollapse::Model.new(tiles, WIDTH, HEIGHT)
+model.solve
+until model.complete?
+  model.iterate
+end
+
+result = profile.stop
+
+# Print a flat profile to text
+printer = RubyProf::FlatPrinter.new(result)
+printer.print(STDOUT, min_percent: 1)
