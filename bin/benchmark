@@ -73,8 +73,9 @@ if ENV["CI"]
 end
 
 yjit_status = defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled? ? "on" : "off"
+zjit_status = defined?(RubyVM::ZJIT) && RubyVM::ZJIT.enabled? ? "on" : "off"
 puts RUBY_DESCRIPTION
-puts "Tiles loaded: #{tiles.size}, YJIT=#{yjit_status}"
+puts "Tiles loaded: #{tiles.size}, YJIT=#{yjit_status}, ZJIT=#{zjit_status}"
 puts
 
 # Accepts either "N" (treated as NxN) or "WxH" entries.
